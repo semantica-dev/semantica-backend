@@ -1,0 +1,19 @@
+name: semantica-dev
+services:
+  rabbit:
+    container_name: semantica-rabbit
+    image: rabbitmq:4-management
+    hostname: semantica
+    ports:
+      - "5672:5672"   # AMQP protocol
+      - "15672:15672" # Management UI
+      - "1883:1883"   # MQTT protocol
+    volumes:
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
+      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json
+    networks:
+      - semantica-net
+
+networks:
+  semantica-net:
+    name: semantica-net

@@ -1,0 +1,172 @@
+{
+    "rabbit_version": "4.0.7",
+    "rabbitmq_version": "4.0.7",
+    "product_name": "RabbitMQ",
+    "product_version": "4.0.7",
+    "rabbitmq_definition_format": "cluster",
+    "original_cluster_name": "rabbit@semantica",
+    "explanation": "Definitions of cluster 'rabbit@semantica'",
+    "users": [
+        {
+            "name": "guest",
+            "password_hash": "9/1i+jKFRpbTRV1PtRnzFFYibT3cEpP92JeZ8YKGtflf4e/u",
+            "hashing_algorithm": "rabbit_password_hashing_sha256",
+            "tags": [
+                "administrator"
+            ],
+            "limits": {}
+        }
+    ],
+    "vhosts": [
+        {
+            "name": "/",
+            "description": "Default virtual host",
+            "metadata": {
+                "description": "Default virtual host",
+                "tags": [],
+                "default_queue_type": "classic"
+            },
+            "tags": [],
+            "default_queue_type": "classic"
+        }
+    ],
+    "permissions": [
+        {
+            "user": "guest",
+            "vhost": "/",
+            "configure": ".*",
+            "write": ".*",
+            "read": ".*"
+        }
+    ],
+    "topic_permissions": [],
+    "parameters": [],
+    "global_parameters": [
+        {
+            "name": "cluster_tags",
+            "value": []
+        },
+        {
+            "name": "internal_cluster_id",
+            "value": "rabbitmq-cluster-id-hA3wnOL7X278auwgd2rd0g"
+        }
+    ],
+    "policies": [],
+    "queues": [
+        {
+            "name": "crawl-requests-queue",
+            "vhost": "/",
+            "durable": true,
+            "auto_delete": false,
+            "arguments": {
+                "x-queue-type": "classic"
+            }
+        },
+        {
+            "name": "extract-responses-queue",
+            "vhost": "/",
+            "durable": true,
+            "auto_delete": false,
+            "arguments": {
+                "x-queue-type": "classic"
+            }
+        },
+        {
+            "name": "embed-requests-queue",
+            "vhost": "/",
+            "durable": true,
+            "auto_delete": false,
+            "arguments": {
+                "x-queue-type": "classic"
+            }
+        },
+        {
+            "name": "extract-requests-queue",
+            "vhost": "/",
+            "durable": true,
+            "auto_delete": false,
+            "arguments": {
+                "x-queue-type": "classic"
+            }
+        },
+        {
+            "name": "embed-responses-queue",
+            "vhost": "/",
+            "durable": true,
+            "auto_delete": false,
+            "arguments": {
+                "x-queue-type": "classic"
+            }
+        },
+        {
+            "name": "crawl-responses-queue",
+            "vhost": "/",
+            "durable": true,
+            "auto_delete": false,
+            "arguments": {
+                "x-queue-type": "classic"
+            }
+        }
+    ],
+    "exchanges": [
+        {
+            "name": "processing",
+            "vhost": "/",
+            "type": "topic",
+            "durable": true,
+            "auto_delete": false,
+            "internal": false,
+            "arguments": {}
+        }
+    ],
+    "bindings": [
+        {
+            "source": "processing",
+            "vhost": "/",
+            "destination": "crawl-requests-queue",
+            "destination_type": "queue",
+            "routing_key": "request.crawl",
+            "arguments": {}
+        },
+        {
+            "source": "processing",
+            "vhost": "/",
+            "destination": "embed-requests-queue",
+            "destination_type": "queue",
+            "routing_key": "request.embed",
+            "arguments": {}
+        },
+        {
+            "source": "processing",
+            "vhost": "/",
+            "destination": "extract-requests-queue",
+            "destination_type": "queue",
+            "routing_key": "request.extract",
+            "arguments": {}
+        },
+        {
+            "source": "processing",
+            "vhost": "/",
+            "destination": "crawl-responses-queue",
+            "destination_type": "queue",
+            "routing_key": "response.crawl",
+            "arguments": {}
+        },
+        {
+            "source": "processing",
+            "vhost": "/",
+            "destination": "embed-responses-queue",
+            "destination_type": "queue",
+            "routing_key": "response.embed",
+            "arguments": {}
+        },
+        {
+            "source": "processing",
+            "vhost": "/",
+            "destination": "extract-responses-queue",
+            "destination_type": "queue",
+            "routing_key": "response.extract",
+            "arguments": {}
+        }
+    ]
+}
