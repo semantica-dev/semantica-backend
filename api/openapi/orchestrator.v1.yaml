@@ -1,0 +1,59 @@
+# File: api/openapi/orchestrator.v1.yaml
+openapi: 3.0.0
+info:
+  title: Orchestrator API
+  version: v1
+  description: API for managing indexing tasks
+
+servers:
+  - url: http://localhost:8080 # Замените на ваш реальный URL, если он другой
+    description: Development server
+
+paths:
+  /api/v1/tasks/crawl:
+    post:
+      summary: Create a new crawl task
+      operationId: createCrawlTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+                  format: url
+                  example: "https://example.com"
+              required:
+                - url
+      responses:
+        "202":
+          description: Task accepted for processing
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task_id:
+                    type: string
+                    format: uuid
+                    example: "a1b2c3d4-e5f6-7890-1234-567890abcdef"
+        "400":
+          description: Bad request (e.g., invalid URL)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
