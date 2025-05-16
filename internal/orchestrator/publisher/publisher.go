@@ -5,7 +5,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/semantica-dev/semantica-backend/pkg/messaging" // Убедитесь, что путь правильный
+	"github.com/semantica-dev/semantica-backend/pkg/messaging"
 )
 
 type TaskPublisher struct {
@@ -22,5 +22,13 @@ func NewTaskPublisher(client *messaging.RabbitMQClient, logger *slog.Logger) *Ta
 
 func (p *TaskPublisher) PublishCrawlTask(ctx context.Context, task messaging.CrawlTaskEvent) error {
 	p.logger.Info("Publishing crawl task", "task_id", task.TaskID, "url", task.URL)
+	// Используем напрямую client.Publish, так как TaskPublisher - это обертка
 	return p.client.Publish(ctx, messaging.TasksExchange, messaging.CrawlTaskRoutingKey, task)
+}
+
+// Client возвращает нижележащий RabbitMQ клиент для публикации других типов сообщений.
+// В идеале, TaskPublisher должен иметь методы для каждого типа задачи, которую он может публиковать.
+// Но для MVP это упрощение.
+func (p *TaskPublisher) Client() *messaging.RabbitMQClient {
+	return p.client
 }
