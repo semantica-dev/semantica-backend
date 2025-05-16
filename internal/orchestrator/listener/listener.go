@@ -7,8 +7,8 @@ import (
 	"log/slog"
 
 	"github.com/rabbitmq/amqp091-go"
-	"github.com/semantica-dev/semantica-backend/internal/orchestrator/publisher" // Убедитесь, что путь правильный
-	"github.com/semantica-dev/semantica-backend/pkg/messaging"                   // Убедитесь, что путь правильный
+	"github.com/semantica-dev/semantica-backend/internal/orchestrator/publisher"
+	"github.com/semantica-dev/semantica-backend/pkg/messaging"
 )
 
 type TaskListener struct {
@@ -32,30 +32,37 @@ func (l *TaskListener) HandleCrawlResult(delivery amqp091.Delivery) error {
 		return err // Nack
 	}
 
-	l.logger.Info("Received crawl result", "task_id", crawlResult.TaskID, "url", crawlResult.URL, "success", crawlResult.Success, "raw_data_path", crawlResult.RawDataPath)
+	l.logger.Info("Received crawl result",
+		"task_id", crawlResult.TaskID,
+		"url", crawlResult.URL,
+		"success", crawlResult.Success,
+		"raw_data_path", crawlResult.RawDataPath)
 
 	if !crawlResult.Success {
-		l.logger.Warn("Crawl task failed, not proceeding to extraction", "task_id", crawlResult.TaskID, "url", crawlResult.URL, "message", crawlResult.Message)
+		l.logger.Warn("Crawl task failed, not proceeding to extraction",
+			"task_id", crawlResult.TaskID, "url", crawlResult.URL, "message", crawlResult.Message)
 		// TODO: Обновить статус задачи в БД как FAILED
+		// TODO: Возможно, опубликовать TaskProcessingFinishedEvent с OverallSuccess: false
 		return nil // Ack, так как мы обработали это состояние (неуспех)
 	}
 
 	// Запускаем задачу для Экстрактора HTML
 	// В реальном приложении нужно будет решить, какой экстрактор запускать (HTML или Other)
-	// Для этого MVP пока хардкодим запуск HTML экстрактора.
-	// Предположим, что RawDataPath - это то, что нужно экстрактору.
+	// на основе типа контента или пользовательского выбора.
+	// Для этого MVP пока хардкодим запуск HTML экстрактора для URL.
 	extractHTMLTask := messaging.ExtractHTMLTaskEvent{
-		TaskID:      crawlResult.TaskID, // Используем тот же TaskID
+		TaskID:      crawlResult.TaskID,
 		OriginalURL: crawlResult.URL,
-		RawDataPath: crawlResult.RawDataPath, // Передаем путь к "сырым" данным
+		RawDataPath: crawlResult.RawDataPath,
 	}
 
 	l.logger.Info("Publishing ExtractHTMLTaskEvent", "task_id", extractHTMLTask.TaskID, "original_url", extractHTMLTask.OriginalURL)
+	// Используем метод Client() из TaskPublisher для доступа к RabbitMQClient
 	err := l.publisher.Client().Publish(context.Background(), messaging.TasksExchange, messaging.ExtractHTMLTaskRoutingKey, extractHTMLTask)
 	if err != nil {
 		l.logger.Error("Failed to publish ExtractHTMLTaskEvent", "error", err, "task_id", extractHTMLTask.TaskID)
-		// Что делать в этом случае? Повторить? Для MVP - просто логируем и Ack'аем исходное сообщение.
-		return nil
+		// TODO: Обработка ошибки публикации. Повтор? Запись в БД как ошибка этапа?
+		return nil // Ack исходного сообщения, чтобы не блокировать очередь.
 	}
 
 	// TODO: Обновить статус задачи в БД (например, CRAWLED_SUCCESSFULLY, AWAITING_EXTRACTION)
@@ -70,15 +77,19 @@ func (l *TaskListener) HandleExtractHTMLResult(delivery amqp091.Delivery) error 
 		return err // Nack
 	}
 
-	l.logger.Info("Received extract HTML result", "task_id", extractResult.TaskID, "url", extractResult.OriginalURL, "success", extractResult.Success, "markdown_path", extractResult.MarkdownPath)
+	l.logger.Info("Received extract HTML result",
+		"task_id", extractResult.TaskID,
+		"url", extractResult.OriginalURL,
+		"success", extractResult.Success,
+		"markdown_path", extractResult.MarkdownPath)
 
 	if !extractResult.Success {
-		l.logger.Warn("Extract HTML task failed, not proceeding to keyword indexing", "task_id", extractResult.TaskID, "message", extractResult.Message)
+		l.logger.Warn("Extract HTML task failed, not proceeding to keyword indexing",
+			"task_id", extractResult.TaskID, "message", extractResult.Message)
 		// TODO: Обновить статус задачи в БД как EXTRACTION_FAILED
 		return nil // Ack
 	}
 
-	// Запускаем задачу для Индексатора Ключевых Слов
 	indexKeywordsTask := messaging.IndexKeywordsTaskEvent{
 		TaskID:            extractResult.TaskID,
 		OriginalURL:       extractResult.OriginalURL,
@@ -95,21 +106,39 @@ func (l *TaskListener) HandleExtractHTMLResult(delivery amqp091.Delivery) error 
 	return nil // Ack
 }
 
-// HandleExtractOtherResult (по аналогии, если бы мы его запускали)
+// HandleExtractOtherResult обрабатывает результат от Экстрактора Других Файлов
+// (пока не используется активно в цепочке Оркестратора, но может быть вызван, если Оркестратор начнет его слушать)
 func (l *TaskListener) HandleExtractOtherResult(delivery amqp091.Delivery) error {
 	var extractResult messaging.ExtractOtherResultEvent
 	if err := json.Unmarshal(delivery.Body, &extractResult); err != nil {
 		l.logger.Error("Failed to unmarshal extract other result event", "error", err, "body", string(delivery.Body))
 		return err
 	}
-	l.logger.Info("Received extract other result", "task_id", extractResult.TaskID, "success", extractResult.Success, "path", extractResult.ExtractedTextPath)
-	// Логика для запуска следующего этапа (например, IndexKeywordsTask)
-	// ...
+	l.logger.Info("Received extract other result",
+		"task_id", extractResult.TaskID,
+		"success", extractResult.Success,
+		"original_file_path", extractResult.OriginalFilePath,
+		"extracted_text_path", extractResult.ExtractedTextPath)
+
 	if !extractResult.Success {
-		l.logger.Warn("Extract Other task failed", "task_id", extractResult.TaskID)
+		l.logger.Warn("Extract Other task failed", "task_id", extractResult.TaskID, "message", extractResult.Message)
+		// TODO: Обновить статус задачи в БД
 		return nil
 	}
-	// ... публикация IndexKeywordsTaskEvent
+
+	// Логика для запуска следующего этапа, например, IndexKeywordsTask
+	indexKeywordsTask := messaging.IndexKeywordsTaskEvent{
+		TaskID:            extractResult.TaskID,
+		OriginalFilePath:  extractResult.OriginalFilePath,
+		ProcessedDataPath: extractResult.ExtractedTextPath,
+	}
+	l.logger.Info("Publishing IndexKeywordsTaskEvent (from ExtractOtherResult)", "task_id", indexKeywordsTask.TaskID)
+	err := l.publisher.Client().Publish(context.Background(), messaging.TasksExchange, messaging.IndexKeywordsTaskRoutingKey, indexKeywordsTask)
+	if err != nil {
+		l.logger.Error("Failed to publish IndexKeywordsTaskEvent (from ExtractOtherResult)", "error", err, "task_id", indexKeywordsTask.TaskID)
+		return nil
+	}
+	// TODO: Обновить статус задачи в БД
 	return nil
 }
 
@@ -121,48 +150,24 @@ func (l *TaskListener) HandleIndexKeywordsResult(delivery amqp091.Delivery) erro
 		return err // Nack
 	}
 
-	l.logger.Info("Received index keywords result", "task_id", keywordsResult.TaskID, "success", keywordsResult.Success, "keywords_stored", keywordsResult.KeywordsStored)
+	l.logger.Info("Received index keywords result",
+		"task_id", keywordsResult.TaskID,
+		"success", keywordsResult.Success,
+		"keywords_stored", keywordsResult.KeywordsStored,
+		"processed_data_path", keywordsResult.ProcessedDataPath)
 
 	if !keywordsResult.Success {
-		l.logger.Warn("Index keywords task failed, not proceeding to embedding indexing", "task_id", keywordsResult.TaskID, "message", keywordsResult.Message)
+		l.logger.Warn("Index keywords task failed, not proceeding to embedding indexing",
+			"task_id", keywordsResult.TaskID, "message", keywordsResult.Message)
 		// TODO: Обновить статус задачи в БД
 		return nil // Ack
 	}
 
-	// Предполагаем, что эмбеддинги генерируются на основе того же ProcessedDataPath,
-	// который использовался для ключевых слов. Если это не так, нужно будет передавать нужный путь.
-	// В IndexKeywordsTaskEvent у нас есть OriginalURL и OriginalFilePath, но нет ProcessedDataPath.
-	// Это нужно исправить в IndexKeywordsResultEvent или передавать его как-то иначе.
-	// Пока для MVP предположим, что мы его можем получить или он не нужен для следующего шага (что неверно).
-	// Давайте добавим ProcessedDataPath в IndexKeywordsResultEvent для корректности.
-	// НО! Мы не можем изменить уже отправленное сообщение. Значит, нужно его как-то получить.
-	// Для простоты MVP, предположим, что IndexEmbeddingsTaskEvent может быть создан без него,
-	// или что он был сохранен в Оркестраторе вместе со статусом задачи.
-	// Либо, что более правильно, IndexKeywordsResultEvent должен содержать ProcessedDataPath.
-	// Допустим, ProcessedDataPath был в keywordsResult (если бы мы его туда добавили)
-
-	// ВАЖНО: IndexKeywordsResultEvent не содержит ProcessedDataPath.
-	// Мы должны либо:
-	// 1. Получить его из состояния задачи, хранимого в Оркестраторе (если бы оно было).
-	// 2. Предположить, что следующий шаг (Embedding Indexer) сам знает, откуда брать данные,
-	//    используя TaskID и OriginalURL/OriginalFilePath (например, по конвенции имен в Minio).
-	// 3. Изменить IndexKeywordsResultEvent, чтобы он содержал ProcessedDataPath.
-	//
-	// Для текущего MVP, давайте сделаем допущение, что Индексатор Эмбеддингов
-	// ожидает путь к данным, который был результатом предыдущего шага экстракции.
-	// Мы передавали ProcessedDataPath в IndexKeywordsTaskEvent.
-	// Значит, IndexKeywordsResultEvent должен вернуть его или что-то, что позволит его восстановить.
-	//
-	// Временно, для простоты, будем считать, что ProcessedDataPath нам известен из контекста TaskID
-	// или его можно извлечь из метаданных (но это не отражено в коде).
-	// Для примера передадим "unknown_path_for_embeddings_simulated"
-
 	indexEmbeddingsTask := messaging.IndexEmbeddingsTaskEvent{
-		TaskID:           keywordsResult.TaskID,
-		OriginalURL:      keywordsResult.OriginalURL,
-		OriginalFilePath: keywordsResult.OriginalFilePath,
-		// ProcessedDataPath: keywordsResult.ProcessedDataPath, // ЕСЛИ БЫ ОН ТАМ БЫЛ
-		ProcessedDataPath: "simulated/path/from/keywords/step/" + keywordsResult.TaskID, // ЗАГЛУШКА
+		TaskID:            keywordsResult.TaskID,
+		OriginalURL:       keywordsResult.OriginalURL,
+		OriginalFilePath:  keywordsResult.OriginalFilePath,
+		ProcessedDataPath: keywordsResult.ProcessedDataPath, // Используем путь из результата предыдущего шага
 	}
 
 	l.logger.Info("Publishing IndexEmbeddingsTaskEvent", "task_id", indexEmbeddingsTask.TaskID)
@@ -183,7 +188,10 @@ func (l *TaskListener) HandleIndexEmbeddingsResult(delivery amqp091.Delivery) er
 		return err // Nack
 	}
 
-	l.logger.Info("Received index embeddings result", "task_id", embeddingsResult.TaskID, "success", embeddingsResult.Success, "embeddings_stored", embeddingsResult.EmbeddingsStored)
+	l.logger.Info("Received index embeddings result",
+		"task_id", embeddingsResult.TaskID,
+		"success", embeddingsResult.Success,
+		"embeddings_stored", embeddingsResult.EmbeddingsStored)
 
 	if !embeddingsResult.Success {
 		l.logger.Warn("Index embeddings task failed", "task_id", embeddingsResult.TaskID, "message", embeddingsResult.Message)
@@ -191,50 +199,30 @@ func (l *TaskListener) HandleIndexEmbeddingsResult(delivery amqp091.Delivery) er
 		return nil // Ack
 	}
 
-	// На этом этапе основная цепочка обработки данных завершена (до этапа поиска).
-	// Можно обновить финальный статус задачи.
-	l.logger.Info("Main data processing pipeline finished for task", "task_id", embeddingsResult.TaskID)
+	l.logger.Info("Main data processing pipeline appears finished for task (after embeddings)", "task_id", embeddingsResult.TaskID)
+	// Событие TaskProcessingFinishedEvent публикуется самим indexer-embeddings воркером,
+	// так что здесь Оркестратору не нужно его дублировать.
 	// TODO: Обновить статус задачи в БД как COMPLETED или PROCESSING_SUCCESSFUL
 
 	return nil // Ack
 }
 
-// HandleTaskProcessingFinished (если Оркестратор хочет слушать и это событие)
+// HandleTaskProcessingFinished обрабатывает финальное событие о завершении всей цепочки
 func (l *TaskListener) HandleTaskProcessingFinished(delivery amqp091.Delivery) error {
 	var finishedEvent messaging.TaskProcessingFinishedEvent
 	if err := json.Unmarshal(delivery.Body, &finishedEvent); err != nil {
 		l.logger.Error("Failed to unmarshal task processing finished event", "error", err, "body", string(delivery.Body))
-		return err
+		return err // Nack
 	}
 
-	l.logger.Info("Received TaskProcessingFinishedEvent",
+	l.logger.Info("Received TaskProcessingFinishedEvent from a worker",
 		"task_id", finishedEvent.TaskID,
 		"overall_success", finishedEvent.OverallSuccess,
 		"final_message", finishedEvent.FinalMessage,
 	)
-	// Здесь можно выполнить финальные действия по задаче, например, уведомить пользователя.
+	// Здесь можно выполнить финальные действия по задаче, например, уведомить пользователя (если это роль Оркестратора)
+	// или просто обновить финальный статус в БД.
 	// TODO: Обновить статус задачи в БД на финальный (например, FINISHED_SUCCESS / FINISHED_FAILED).
-	return nil
-}
-
-// Вспомогательный метод для доступа к RabbitMQ клиенту из publisher
-// (пока TaskPublisher не имеет такого метода, добавим его или используем напрямую)
-func (p *publisher.TaskPublisher) Client() *messaging.RabbitMQClient {
-	// Это заглушка, нужно чтобы TaskPublisher предоставлял доступ к своему клиенту
-	// или чтобы listener получал RabbitMQClient напрямую.
-	// Для MVP, если publisher инкапсулирует client, нам нужен способ его получить.
-	// Либо TaskPublisher должен иметь методы для публикации ВСЕХ типов сообщений, а не только CrawlTask.
-	//
-	// ВАРИАНТ 1: Listener получает RabbitMQClient напрямую.
-	// ВАРИАНТ 2: TaskPublisher расширяется.
-	//
-	// Давайте для простоты предположим, что TaskPublisher будет расширен.
-	// Но пока что я буду вызывать publisher.client.Publish(...) в коде выше,
-	// ПОДРАЗУМЕВАЯ, ЧТО TaskPublisher будет модифицирован, чтобы публиковать не только CrawlTask,
-	// или что listener будет использовать RabbitMQClient напрямую для этих публикаций.
-	//
-	// Для текущей реализации кода listener'а выше, я использовал publisher.Client().Publish(...),
-	// что предполагает, что у publisher есть метод Client(), возвращающий *messaging.RabbitMQClient.
-	// Давайте добавим его в TaskPublisher для консистентности.
-	return nil // Эта функция здесь просто для примера, она должна быть в publisher.go
+	l.logger.Info("Processing task marked as finished", "task_id", finishedEvent.TaskID, "success", finishedEvent.OverallSuccess)
+	return nil // Ack
 }

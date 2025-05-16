@@ -19,7 +19,7 @@ type CrawlResultEvent struct {
 	URL         string `json:"url"`
 	Success     bool   `json:"success"`
 	Message     string `json:"message,omitempty"`
-	RawDataPath string `json:"raw_data_path,omitempty"` // Путь к сырым данным в Minio (добавим позже реальное значение)
+	RawDataPath string `json:"raw_data_path"` // Сделали обязательным при успехе (ранее было omitempty)
 }
 
 // --- События для Экстрактора HTML ---
@@ -37,7 +37,8 @@ type ExtractHTMLTaskEvent struct {
 type ExtractHTMLResultEvent struct {
 	TaskID       string `json:"task_id"`
 	OriginalURL  string `json:"original_url"`
-	MarkdownPath string `json:"markdown_path,omitempty"` // Путь к Markdown в Minio (добавим позже реальное значение)
+	RawDataPath  string `json:"raw_data_path"` // Путь к сырым данным, с которыми работали
+	MarkdownPath string `json:"markdown_path"` // Сделали обязательным при успехе (ранее было omitempty)
 	Success      bool   `json:"success"`
 	Message      string `json:"message,omitempty"`
 }
@@ -57,7 +58,8 @@ type ExtractOtherTaskEvent struct {
 type ExtractOtherResultEvent struct {
 	TaskID            string `json:"task_id"`
 	OriginalFilePath  string `json:"original_file_path"`
-	ExtractedTextPath string `json:"extracted_text_path,omitempty"` // Путь к извлеченному тексту в Minio
+	RawDataPath       string `json:"raw_data_path"`       // Путь к сырым данным
+	ExtractedTextPath string `json:"extracted_text_path"` // Сделали обязательным при успехе (ранее было omitempty)
 	Success           bool   `json:"success"`
 	Message           string `json:"message,omitempty"`
 }
@@ -76,12 +78,13 @@ type IndexKeywordsTaskEvent struct {
 }
 
 type IndexKeywordsResultEvent struct {
-	TaskID           string `json:"task_id"`
-	OriginalURL      string `json:"original_url,omitempty"`
-	OriginalFilePath string `json:"original_file_path,omitempty"`
-	KeywordsStored   bool   `json:"keywords_stored"` // Признак, что ключевые слова сохранены (пока bool)
-	Success          bool   `json:"success"`
-	Message          string `json:"message,omitempty"`
+	TaskID            string `json:"task_id"`
+	OriginalURL       string `json:"original_url,omitempty"`
+	OriginalFilePath  string `json:"original_file_path,omitempty"`
+	ProcessedDataPath string `json:"processed_data_path"` // Путь к данным, по которым индексировали
+	KeywordsStored    bool   `json:"keywords_stored"`
+	Success           bool   `json:"success"`
+	Message           string `json:"message,omitempty"`
 }
 
 // --- События для Индексатора Эмбеддингов ---
@@ -95,16 +98,16 @@ type IndexEmbeddingsTaskEvent struct {
 	OriginalURL       string `json:"original_url,omitempty"`
 	OriginalFilePath  string `json:"original_file_path,omitempty"`
 	ProcessedDataPath string `json:"processed_data_path"` // Путь к Markdown или извлеченному тексту
-	// В будущем: информация о чанках, если разбиение происходит до этого воркера
 }
 
 type IndexEmbeddingsResultEvent struct {
-	TaskID           string `json:"task_id"`
-	OriginalURL      string `json:"original_url,omitempty"`
-	OriginalFilePath string `json:"original_file_path,omitempty"`
-	EmbeddingsStored bool   `json:"embeddings_stored"` // Признак, что эмбеддинги сохранены
-	Success          bool   `json:"success"`
-	Message          string `json:"message,omitempty"`
+	TaskID            string `json:"task_id"`
+	OriginalURL       string `json:"original_url,omitempty"`
+	OriginalFilePath  string `json:"original_file_path,omitempty"`
+	ProcessedDataPath string `json:"processed_data_path"` // Путь к данным, по которым извлекали эмбеддинги
+	EmbeddingsStored  bool   `json:"embeddings_stored"`
+	Success           bool   `json:"success"`
+	Message           string `json:"message,omitempty"`
 }
 
 // --- Общее событие для завершения всей цепочки задач (опционально, для Оркестратора) ---
@@ -118,5 +121,4 @@ type TaskProcessingFinishedEvent struct {
 	OriginalFilePath string `json:"original_file_path,omitempty"`
 	OverallSuccess   bool   `json:"overall_success"`
 	FinalMessage     string `json:"final_message,omitempty"`
-	// Сюда можно добавить ссылки на все артефакты, если нужно
 }

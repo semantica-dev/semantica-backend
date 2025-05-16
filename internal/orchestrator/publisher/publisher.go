@@ -5,7 +5,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/semantica-dev/semantica-backend/pkg/messaging"
+	"github.com/semantica-dev/semantica-backend/pkg/messaging" // Убедитесь, что путь правильный
 )
 
 type TaskPublisher struct {
@@ -20,15 +20,20 @@ func NewTaskPublisher(client *messaging.RabbitMQClient, logger *slog.Logger) *Ta
 	}
 }
 
+// PublishCrawlTask публикует задачу на краулинг.
+// В будущем здесь могут быть методы для публикации других конкретных типов задач,
+// если мы хотим большей типизации и инкапсуляции, чем просто предоставление Client().
 func (p *TaskPublisher) PublishCrawlTask(ctx context.Context, task messaging.CrawlTaskEvent) error {
 	p.logger.Info("Publishing crawl task", "task_id", task.TaskID, "url", task.URL)
-	// Используем напрямую client.Publish, так как TaskPublisher - это обертка
 	return p.client.Publish(ctx, messaging.TasksExchange, messaging.CrawlTaskRoutingKey, task)
 }
 
-// Client возвращает нижележащий RabbitMQ клиент для публикации других типов сообщений.
-// В идеале, TaskPublisher должен иметь методы для каждого типа задачи, которую он может публиковать.
-// Но для MVP это упрощение.
+// Client возвращает нижележащий RabbitMQ клиент.
+// Это позволяет другим частям Оркестратора (например, TaskListener)
+// публиковать различные типы сообщений, используя уже существующее соединение.
+// Альтернативой было бы добавление в TaskPublisher отдельных методов для каждого типа сообщения,
+// которое Оркестратор может отправлять (PublishExtractHTMLTask, PublishIndexKeywordsTask и т.д.).
+// Для MVP предоставление клиента является допустимым упрощением.
 func (p *TaskPublisher) Client() *messaging.RabbitMQClient {
 	return p.client
 }
