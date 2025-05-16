@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time" // Добавляем импорт time
 
 	"github.com/semantica-dev/semantica-backend/internal/worker/extractorother"
 	"github.com/semantica-dev/semantica-backend/pkg/config"
@@ -19,9 +20,18 @@ func main() {
 	cfg := config.LoadConfig()
 	appLogger.Info("Configuration loaded", "rabbitmq_url", cfg.RabbitMQ_URL)
 
-	rmqClient, err := messaging.NewRabbitMQClient(cfg.RabbitMQ_URL, appLogger.With("component", "rabbitmq_client"))
+	// Параметры для retry подключения к RabbitMQ
+	const rabbitMaxRetries = 5
+	const rabbitRetryInterval = 5 * time.Second
+
+	rmqClient, err := messaging.NewRabbitMQClient(
+		cfg.RabbitMQ_URL,
+		appLogger.With("component", "rabbitmq_client"),
+		rabbitMaxRetries,    // <--- Добавлен параметр
+		rabbitRetryInterval, // <--- Добавлен параметр
+	)
 	if err != nil {
-		appLogger.Error("Failed to initialize RabbitMQ client. Exiting.", "error", err)
+		appLogger.Error("Failed to initialize RabbitMQ client after all retries. Exiting.", "error", err)
 		os.Exit(1)
 	}
 	defer rmqClient.Close()
@@ -40,14 +50,17 @@ func main() {
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		err := rmqClient.Consume(consumeOpts, service.HandleTask)
-		if err != nil {
-			appLogger.Error("RabbitMQ consumer failed", "error", err)
-			done <- syscall.SIGABRT
+		if err := rmqClient.Consume(consumeOpts, service.HandleTask); err != nil {
+			appLogger.Error("RabbitMQ consumer failed and stopped.", "error", err)
+			select {
+			case done <- syscall.SIGABRT:
+			default:
+			}
 		}
 	}()
 
 	appLogger.Info("Worker-Extractor-Other service is now running. Press CTRL+C to exit.")
-	<-done
-	appLogger.Info("Worker-Extractor-Other service shutting down...")
+	sig := <-done
+	appLogger.Info("Received signal, shutting down Worker-Extractor-Other service...", "signal", sig.String())
+	appLogger.Info("Worker-Extractor-Other service shut down.")
 }

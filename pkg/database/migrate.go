@@ -9,17 +9,14 @@ import (
 	"time"
 
 	"github.com/pressly/goose/v3"
-	// Драйверы должны быть импортированы там, где используется sql.Open,
-	// или здесь, если этот пакет будет предоставлять и функцию OpenDB.
-	// Для миграций достаточно, чтобы драйвер был зарегистрирован в main.
-	// _ "github.com/lib/pq" // Можно оставить здесь или в main пакетах, использующих БД
+	// _ "github.com/lib/pq" // Драйвер импортируется в main
 )
 
 // ApplyMigrations выполняет миграции базы данных с использованием goose.
-// Принимает логгер, тип драйвера БД, DSN и путь к директории с миграциями.
+// Включает механизм повторных попыток для Ping.
 func ApplyMigrations(logger *slog.Logger, dbDriver, dbDSN, migrationsDir string) error {
 	if dbDSN == "" {
-		logger.Debug("POSTGRES_DSN is not set, skipping migrations.") // Изменил на Debug для менее важного сообщения
+		logger.Debug("POSTGRES_DSN is not set, skipping migrations.")
 		return nil
 	}
 	if migrationsDir == "" {
@@ -29,7 +26,6 @@ func ApplyMigrations(logger *slog.Logger, dbDriver, dbDSN, migrationsDir string)
 
 	logger.Info("Attempting to connect to database for migrations...", "driver", dbDriver, "migrations_dir", migrationsDir)
 
-	// sql.Open не устанавливает соединение сразу.
 	db, err := sql.Open(dbDriver, dbDSN)
 	if err != nil {
 		logger.Error("Failed to prepare SQL connection for migrations", "error", err)
@@ -37,14 +33,33 @@ func ApplyMigrations(logger *slog.Logger, dbDriver, dbDSN, migrationsDir string)
 	}
 	defer db.Close()
 
-	// Проверка фактического соединения с базой данных
-	pingCtx, pingCancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer pingCancel()
-	if err = db.PingContext(pingCtx); err != nil {
-		logger.Error("Failed to ping database for migrations", "error", err)
-		return fmt.Errorf("db.PingContext: %w", err)
+	// Механизм повторных попыток для Ping
+	const maxPingRetries = 5
+	const pingRetryInterval = 3 * time.Second
+	var pingErr error
+
+	for attempt := 1; attempt <= maxPingRetries; attempt++ {
+		logger.Info("Pinging database...", "attempt", attempt, "max_attempts", maxPingRetries)
+		pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second) // Таймаут для одной попытки Ping
+		pingErr = db.PingContext(pingCtx)
+		pingCancel() // Освобождаем ресурсы контекста
+
+		if pingErr == nil {
+			logger.Info("Successfully connected to database for migrations (ping successful).")
+			break // Успех
+		}
+
+		logger.Warn("Failed to ping database", "attempt", attempt, "error", pingErr)
+		if attempt < maxPingRetries {
+			logger.Info("Retrying ping after interval", "interval", pingRetryInterval.String())
+			time.Sleep(pingRetryInterval)
+		}
 	}
-	logger.Info("Successfully connected to database for migrations.")
+
+	if pingErr != nil { // Если после всех попыток Ping не удался
+		logger.Error("Failed to ping database after multiple retries", "max_attempts", maxPingRetries, "error", pingErr)
+		return fmt.Errorf("failed to ping database after %d attempts: %w", maxPingRetries, pingErr)
+	}
 
 	logger.Info("Setting goose dialect...", "dialect", dbDriver)
 	if err := goose.SetDialect(dbDriver); err != nil {
