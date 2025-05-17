@@ -8,7 +8,7 @@ services:
       - "${RABBITMQ_HOST_AMQP_PORT:-5672}:5672"
       - "${RABBITMQ_HOST_MANAGEMENT_PORT:-15672}:15672"
     volumes:
-      - rabbitmq-data:/var/lib/rabbitmq
+      - semantica-rabbitmq-data:/var/lib/rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
@@ -30,7 +30,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - semantica-postgres-data:/var/lib/postgresql/data
     ports:
       - "${POSTGRES_HOST_PORT:-5432}:5432"
     healthcheck:
@@ -50,7 +50,7 @@ services:
       - "${MINIO_HOST_API_PORT:-9000}:9000"
       - "${MINIO_HOST_CONSOLE_PORT:-9001}:9001"
     volumes:
-      - minio-data:/data
+      - semantica-minio-data:/data
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
@@ -223,13 +223,17 @@ services:
       - semantica-network
 
 volumes:
-  rabbitmq-data:
+  semantica-rabbitmq-data:
+    name: semantica-rabbitmq-data
     driver: local
-  postgres-data:
+  semantica-postgres-data:
+    name: semantica-postgres-data
     driver: local
-  minio-data:
+  semantica-minio-data:
+    name: semantica-minio-data
     driver: local
 
 networks:
   semantica-network:
+    name: semantica-network
     driver: bridge
