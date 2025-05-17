@@ -5,12 +5,11 @@ services:
     image: rabbitmq:3.13-management-alpine
     container_name: semantica-rabbitmq
     ports:
-      - "${RABBITMQ_HOST_AMQP_PORT:-5672}:5672" # AMQP порт
-      - "${RABBITMQ_HOST_MANAGEMENT_PORT:-15672}:15672" # Management UI порт
+      - "${RABBITMQ_HOST_AMQP_PORT:-5672}:5672"
+      - "${RABBITMQ_HOST_MANAGEMENT_PORT:-15672}:15672"
     volumes:
-      - rabbitmq_data:/var/lib/rabbitmq # Сохранение данных RabbitMQ
+      - rabbitmq_data:/var/lib/rabbitmq
     environment:
-      # Используем значения из .env или значения по умолчанию, если в .env нет
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-guest}
     healthcheck:
@@ -18,7 +17,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 10s # Даем время на запуск перед первой проверкой
+      start_period: 10s
     restart: unless-stopped
     networks:
       - semantica_network
@@ -27,15 +26,13 @@ services:
     image: postgres:16-alpine
     container_name: semantica-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER} # Обязательно должны быть в .env
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD} # Обязательно должны быть в .env
-      POSTGRES_DB: ${POSTGRES_DB} # Обязательно должны быть в .env
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      - postgres_data:/var/lib/postgresql/data # Сохранение данных PostgreSQL
-      # Если нужны init-скрипты (например, для создания расширений, если gen_random_uuid() не работает):
-      # - ./build/postgres/init-scripts:/docker-entrypoint-initdb.d
+      - postgres_data:/var/lib/postgresql/data
     ports:
-      - "${POSTGRES_HOST_PORT:-5432}:5432" # Проброс порта на хост
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -q"]
       interval: 10s
@@ -49,16 +46,14 @@ services:
   orchestrator:
     container_name: semantica-orchestrator
     build:
-      context: . # Корень вашего проекта
-      dockerfile: ./build/orchestrator/Dockerfile # Путь к Dockerfile Оркестратора
+      context: .
+      dockerfile: ./build/orchestrator/Dockerfile
     ports:
-      # Внешний порт хоста : внутренний порт контейнера (только номер порта)
       - "${ORCHESTRATOR_HOST_PORT:-8080}:${ORCHESTRATOR_INTERNAL_PORT_NUMBER:-8080}"
     environment:
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
       POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       MIGRATIONS_DIR: ${MIGRATIONS_DIR:-/app/db/migrations}
-      # Передаем порт, который приложение должно слушать внутри контейнера (с двоеточием)
       ORCHESTRATOR_API_PORT: ":${ORCHESTRATOR_INTERNAL_PORT_NUMBER:-8080}"
       # LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
@@ -81,20 +76,76 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
-      # postgres: # Если краулеру нужен доступ к БД (пока нет)
-      #   condition: service_healthy
     restart: unless-stopped
     networks:
       - semantica_network
 
-# Определение именованных volumes для сохранения данных
+  worker-extractor-html: # <--- НОВЫЙ СЕРВИС
+    container_name: semantica-worker-extractor-html
+    build:
+      context: .
+      dockerfile: ./build/worker-extractor-html/Dockerfile
+    environment:
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
+      # LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - semantica_network
+
+  worker-extractor-other: # <--- НОВЫЙ СЕРВИС
+    container_name: semantica-worker-extractor-other
+    build:
+      context: .
+      dockerfile: ./build/worker-extractor-other/Dockerfile
+    environment:
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
+      # LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - semantica_network
+
+  worker-indexer-keywords: # <--- НОВЫЙ СЕРВИС
+    container_name: semantica-worker-indexer-keywords
+    build:
+      context: .
+      dockerfile: ./build/worker-indexer-keywords/Dockerfile
+    environment:
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
+      # LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - semantica_network
+
+  worker-indexer-embeddings: # <--- НОВЫЙ СЕРВИС
+    container_name: semantica-worker-indexer-embeddings
+    build:
+      context: .
+      dockerfile: ./build/worker-indexer-embeddings/Dockerfile
+    environment:
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
+      # LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - semantica_network
+
 volumes:
   rabbitmq_data:
-    driver: local # Явно указываем драйвер (хотя это по умолчанию)
+    driver: local
   postgres_data:
     driver: local
 
-# Определение общей сети для всех сервисов
 networks:
   semantica_network:
     driver: bridge
