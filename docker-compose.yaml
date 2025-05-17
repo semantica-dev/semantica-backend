@@ -8,10 +8,10 @@ services:
       - "${RABBITMQ_HOST_AMQP_PORT:-5672}:5672"
       - "${RABBITMQ_HOST_MANAGEMENT_PORT:-15672}:15672"
     volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
+      - rabbitmq-data:/var/lib/rabbitmq
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER} # Из .env
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS} # Из .env
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 30s
@@ -20,7 +20,7 @@ services:
       start_period: 10s
     restart: unless-stopped
     networks:
-      - semantica_network
+      - semantica-network
 
   postgres:
     image: postgres:16-alpine
@@ -30,8 +30,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      # - ./build/postgres/init-scripts:/docker-entrypoint-initdb.d
+      - postgres-data:/var/lib/postgresql/data
     ports:
       - "${POSTGRES_HOST_PORT:-5432}:5432"
     healthcheck:
@@ -42,19 +41,19 @@ services:
       start_period: 10s
     restart: unless-stopped
     networks:
-      - semantica_network
+      - semantica-network
 
   minio:
-    image: minio/minio:RELEASE.2024-05-16T19-48-04Z # Пример конкретного релиза
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     container_name: semantica-minio
     ports:
       - "${MINIO_HOST_API_PORT:-9000}:9000"
       - "${MINIO_HOST_CONSOLE_PORT:-9001}:9001"
     volumes:
-      - minio_data:/data
+      - minio-data:/data
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER} # Из .env
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD} # Из .env
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     command: server /data --console-address ":9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
@@ -64,7 +63,7 @@ services:
       start_period: 10s
     restart: unless-stopped
     networks:
-      - semantica_network
+      - semantica-network
 
   orchestrator:
     container_name: semantica-orchestrator
@@ -72,18 +71,20 @@ services:
       context: .
       dockerfile: ./build/orchestrator/Dockerfile
     ports:
-      - "${ORCHESTRATOR_HOST_PORT:-8080}:${ORCHESTRATOR_INTERNAL_PORT_NUMBER:-8080}"
+      - "${ORCHESTRATOR_HOST_PORT:-8080}:8080"
     environment:
-      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
-      POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/"
+      POSTGRES_DSN: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
       MIGRATIONS_DIR: ${MIGRATIONS_DIR:-/app/db/migrations}
-      ORCHESTRATOR_API_PORT: ":${ORCHESTRATOR_INTERNAL_PORT_NUMBER:-8080}"
-      MINIO_ENDPOINT: http://minio:9000
+      ORCHESTRATOR_API_PORT: ${ORCHESTRATOR_API_PORT:-:8080}
+      MINIO_ENDPOINT: "http://minio:9000"
       MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
-      MINIO_USE_SSL: "false"
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
-      # LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
+      APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -93,7 +94,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - semantica_network
+      - semantica-network
 
   worker-crawler:
     container_name: semantica-worker-crawler
@@ -101,13 +102,15 @@ services:
       context: .
       dockerfile: ./build/worker-crawler/Dockerfile
     environment:
-      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
-      MINIO_ENDPOINT: http://minio:9000
+      RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/"
+      MINIO_ENDPOINT: "http://minio:9000"
       MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
-      MINIO_USE_SSL: "false"
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
-      # LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
+      APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -115,7 +118,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - semantica_network
+      - semantica-network
 
   worker-extractor-html:
     container_name: semantica-worker-extractor-html
@@ -123,13 +126,15 @@ services:
       context: .
       dockerfile: ./build/worker-extractor-html/Dockerfile
     environment:
-      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
-      MINIO_ENDPOINT: http://minio:9000
+      RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/"
+      MINIO_ENDPOINT: "http://minio:9000"
       MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
-      MINIO_USE_SSL: "false"
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
-      # LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
+      APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -137,7 +142,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - semantica_network
+      - semantica-network
 
   worker-extractor-other:
     container_name: semantica-worker-extractor-other
@@ -145,13 +150,15 @@ services:
       context: .
       dockerfile: ./build/worker-extractor-other/Dockerfile
     environment:
-      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
-      MINIO_ENDPOINT: http://minio:9000
+      RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/"
+      MINIO_ENDPOINT: "http://minio:9000"
       MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
-      MINIO_USE_SSL: "false"
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
-      # LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
+      APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -159,7 +166,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - semantica_network
+      - semantica-network
 
   worker-indexer-keywords:
     container_name: semantica-worker-indexer-keywords
@@ -167,24 +174,26 @@ services:
       context: .
       dockerfile: ./build/worker-indexer-keywords/Dockerfile
     environment:
-      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
-      MINIO_ENDPOINT: http://minio:9000
+      RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/"
+      MINIO_ENDPOINT: "http://minio:9000"
       MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
-      MINIO_USE_SSL: "false"
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
-      POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable # Понадобится для FTS
-      # LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      POSTGRES_DSN: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
+      APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
     depends_on:
       rabbitmq:
         condition: service_healthy
       minio:
         condition: service_healthy
-      postgres: # Добавляем зависимость от postgres
+      postgres:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - semantica_network
+      - semantica-network
 
   worker-indexer-embeddings:
     container_name: semantica-worker-indexer-embeddings
@@ -192,32 +201,35 @@ services:
       context: .
       dockerfile: ./build/worker-indexer-embeddings/Dockerfile
     environment:
-      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
-      MINIO_ENDPOINT: http://minio:9000
+      RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/"
+      MINIO_ENDPOINT: "http://minio:9000"
       MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
-      MINIO_USE_SSL: "false"
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
-      # QDRANT_URL: http://qdrant:6333 # Понадобится позже
-      # LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # QDRANT_URL: "http://qdrant:6333"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
+      APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
     depends_on:
       rabbitmq:
         condition: service_healthy
       minio:
         condition: service_healthy
-      # qdrant: # (понадобится позже)
+      # qdrant:
       #   condition: service_healthy
     restart: unless-stopped
     networks:
-      - semantica_network
+      - semantica-network
 
 volumes:
-  rabbitmq_data:
+  rabbitmq-data:
     driver: local
-  postgres_data:
+  postgres-data:
     driver: local
-  minio_data: {}
+  minio-data:
+    driver: local
 
 networks:
-  semantica_network:
+  semantica-network:
     driver: bridge
