@@ -10,8 +10,8 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-guest}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-guest}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER} # Из .env
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS} # Из .env
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 30s
@@ -31,12 +31,35 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # - ./build/postgres/init-scripts:/docker-entrypoint-initdb.d
     ports:
       - "${POSTGRES_HOST_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -q"]
       interval: 10s
       timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - semantica_network
+
+  minio:
+    image: minio/minio:RELEASE.2024-05-16T19-48-04Z # Пример конкретного релиза
+    container_name: semantica-minio
+    ports:
+      - "${MINIO_HOST_API_PORT:-9000}:9000"
+      - "${MINIO_HOST_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER} # Из .env
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD} # Из .env
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
       retries: 5
       start_period: 10s
     restart: unless-stopped
@@ -51,15 +74,22 @@ services:
     ports:
       - "${ORCHESTRATOR_HOST_PORT:-8080}:${ORCHESTRATOR_INTERNAL_PORT_NUMBER:-8080}"
     environment:
-      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
       POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       MIGRATIONS_DIR: ${MIGRATIONS_DIR:-/app/db/migrations}
       ORCHESTRATOR_API_PORT: ":${ORCHESTRATOR_INTERNAL_PORT_NUMBER:-8080}"
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_USE_SSL: "false"
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
       # LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       rabbitmq:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -71,71 +101,112 @@ services:
       context: .
       dockerfile: ./build/worker-crawler/Dockerfile
     environment:
-      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_USE_SSL: "false"
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
       # LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     restart: unless-stopped
     networks:
       - semantica_network
 
-  worker-extractor-html: # <--- НОВЫЙ СЕРВИС
+  worker-extractor-html:
     container_name: semantica-worker-extractor-html
     build:
       context: .
       dockerfile: ./build/worker-extractor-html/Dockerfile
     environment:
-      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_USE_SSL: "false"
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
       # LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     restart: unless-stopped
     networks:
       - semantica_network
 
-  worker-extractor-other: # <--- НОВЫЙ СЕРВИС
+  worker-extractor-other:
     container_name: semantica-worker-extractor-other
     build:
       context: .
       dockerfile: ./build/worker-extractor-other/Dockerfile
     environment:
-      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_USE_SSL: "false"
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
       # LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     restart: unless-stopped
     networks:
       - semantica_network
 
-  worker-indexer-keywords: # <--- НОВЫЙ СЕРВИС
+  worker-indexer-keywords:
     container_name: semantica-worker-indexer-keywords
     build:
       context: .
       dockerfile: ./build/worker-indexer-keywords/Dockerfile
     environment:
-      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_USE_SSL: "false"
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
+      POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable # Понадобится для FTS
       # LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      postgres: # Добавляем зависимость от postgres
         condition: service_healthy
     restart: unless-stopped
     networks:
       - semantica_network
 
-  worker-indexer-embeddings: # <--- НОВЫЙ СЕРВИС
+  worker-indexer-embeddings:
     container_name: semantica-worker-indexer-embeddings
     build:
       context: .
       dockerfile: ./build/worker-indexer-embeddings/Dockerfile
     environment:
-      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_USE_SSL: "false"
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
+      # QDRANT_URL: http://qdrant:6333 # Понадобится позже
       # LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       rabbitmq:
         condition: service_healthy
+      minio:
+        condition: service_healthy
+      # qdrant: # (понадобится позже)
+      #   condition: service_healthy
     restart: unless-stopped
     networks:
       - semantica_network
@@ -145,6 +216,7 @@ volumes:
     driver: local
   postgres_data:
     driver: local
+  minio_data: {}
 
 networks:
   semantica_network:
