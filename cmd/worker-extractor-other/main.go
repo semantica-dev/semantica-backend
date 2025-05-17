@@ -5,30 +5,31 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time" // Добавляем импорт time
+	// "time"
 
 	"github.com/semantica-dev/semantica-backend/internal/worker/extractorother"
-	"github.com/semantica-dev/semantica-backend/pkg/config"
+	"github.com/semantica-dev/semantica-backend/pkg/config" // Используем наш пакет config
 	"github.com/semantica-dev/semantica-backend/pkg/logger"
 	"github.com/semantica-dev/semantica-backend/pkg/messaging"
 )
 
 func main() {
-	appLogger := logger.New("worker-extractor-other-service")
+	cfg := config.LoadConfig() // 1. Загружаем конфигурацию
+
+	appLogger := logger.New("worker-extractor-other-service") // 2. Инициализируем логгер
 	appLogger.Info("Starting Worker-Extractor-Other service...")
+	appLogger.Info("Configuration loaded",
+		"rabbitmq_url", cfg.RabbitMQ_URL,
+		"max_retries", cfg.MaxRetries,
+		"retry_interval", cfg.RetryInterval.String(),
+	)
 
-	cfg := config.LoadConfig()
-	appLogger.Info("Configuration loaded", "rabbitmq_url", cfg.RabbitMQ_URL)
-
-	// Параметры для retry подключения к RabbitMQ
-	const rabbitMaxRetries = 5
-	const rabbitRetryInterval = 5 * time.Second
-
+	// 3. Используем значения из cfg для RabbitMQ
 	rmqClient, err := messaging.NewRabbitMQClient(
 		cfg.RabbitMQ_URL,
 		appLogger.With("component", "rabbitmq_client"),
-		rabbitMaxRetries,    // <--- Добавлен параметр
-		rabbitRetryInterval, // <--- Добавлен параметр
+		cfg.MaxRetries,
+		cfg.RetryInterval,
 	)
 	if err != nil {
 		appLogger.Error("Failed to initialize RabbitMQ client after all retries. Exiting.", "error", err)
@@ -36,6 +37,7 @@ func main() {
 	}
 	defer rmqClient.Close()
 
+	// 4. Остальная логика
 	service := extractorother.NewExtractorOtherService(appLogger, rmqClient)
 
 	consumeOpts := messaging.ConsumeOpts{

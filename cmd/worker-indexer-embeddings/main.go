@@ -5,30 +5,40 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time" // Добавляем импорт time
+	// "time"
+
+	// Драйвер Qdrant или другой векторной БД, если этот воркер будет сам подключаться
+	// Пока не нужен, т.к. реальной записи в БД нет
 
 	"github.com/semantica-dev/semantica-backend/internal/worker/indexerembeddings"
-	"github.com/semantica-dev/semantica-backend/pkg/config"
+	"github.com/semantica-dev/semantica-backend/pkg/config" // Используем наш пакет config
 	"github.com/semantica-dev/semantica-backend/pkg/logger"
 	"github.com/semantica-dev/semantica-backend/pkg/messaging"
+	// "github.com/semantica-dev/semantica-backend/pkg/vectorstore" // Если будет клиент для Qdrant
 )
 
 func main() {
-	appLogger := logger.New("worker-indexer-embeddings-service")
+	cfg := config.LoadConfig() // 1. Загружаем конфигурацию
+
+	appLogger := logger.New("worker-indexer-embeddings-service") // 2. Инициализируем логгер
 	appLogger.Info("Starting Worker-Indexer-Embeddings service...")
+	appLogger.Info("Configuration loaded",
+		"rabbitmq_url", cfg.RabbitMQ_URL,
+		"minio_endpoint", cfg.MinioEndpoint, // Этот воркер будет читать из Minio
+		// "qdrant_url", cfg.QdrantURL, // Когда добавим Qdrant
+		"max_retries", cfg.MaxRetries,
+		"retry_interval", cfg.RetryInterval.String(),
+	)
 
-	cfg := config.LoadConfig()
-	appLogger.Info("Configuration loaded", "rabbitmq_url", cfg.RabbitMQ_URL)
+	// TODO: Когда будет реальная запись в Qdrant, здесь нужна будет инициализация клиента Qdrant
+	// и, возможно, передача его в NewIndexerEmbeddingsService.
 
-	// Параметры для retry подключения к RabbitMQ
-	const rabbitMaxRetries = 5
-	const rabbitRetryInterval = 5 * time.Second
-
+	// 3. Используем значения из cfg для RabbitMQ
 	rmqClient, err := messaging.NewRabbitMQClient(
 		cfg.RabbitMQ_URL,
 		appLogger.With("component", "rabbitmq_client"),
-		rabbitMaxRetries,    // <--- Добавлен параметр
-		rabbitRetryInterval, // <--- Добавлен параметр
+		cfg.MaxRetries,
+		cfg.RetryInterval,
 	)
 	if err != nil {
 		appLogger.Error("Failed to initialize RabbitMQ client after all retries. Exiting.", "error", err)
@@ -36,7 +46,9 @@ func main() {
 	}
 	defer rmqClient.Close()
 
-	service := indexerembeddings.NewIndexerEmbeddingsService(appLogger, rmqClient)
+	// 4. Остальная логика
+	// Пока NewIndexerEmbeddingsService не принимает клиент Qdrant, но в будущем будет
+	service := indexerembeddings.NewIndexerEmbeddingsService(appLogger, rmqClient /*, qdrantClient */)
 
 	consumeOpts := messaging.ConsumeOpts{
 		QueueName:    "tasks.index.embeddings.in.queue",
