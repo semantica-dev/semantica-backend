@@ -27,37 +27,43 @@ func (s *IndexerKeywordsService) HandleTask(delivery amqp091.Delivery) error {
 	var task messaging.IndexKeywordsTaskEvent
 	if err := json.Unmarshal(delivery.Body, &task); err != nil {
 		s.logger.Error("Failed to unmarshal index keywords task event", "error", err, "body", string(delivery.Body))
-		return err
+		return err // Nack
 	}
 
 	s.logger.Info("Received index keywords task",
 		"task_id", task.TaskID,
-		"original_url", task.OriginalURL, // Логируем для полноты
-		"original_file_path", task.OriginalFilePath, // Логируем для полноты
-		"processed_data_path", task.ProcessedDataPath)
+		"original_url", task.OriginalURL,
+		"original_file_path", task.OriginalFilePath,
+		"processed_data_path", task.ProcessedDataPath) // Логируем полученный ProcessedDataPath
 
-	s.logger.Info("Simulating keyword indexing...", "task_id", task.TaskID)
+	// Имитация работы индексатора ключевых слов
+	s.logger.Info("Simulating keyword indexing...",
+		"task_id", task.TaskID,
+		"input_processed_path", task.ProcessedDataPath) // Указываем, какой файл "обрабатываем"
 	time.Sleep(1 * time.Second) // Имитация работы
 	s.logger.Info("Keyword indexing simulation finished", "task_id", task.TaskID)
 
+	// Формируем результат
 	result := messaging.IndexKeywordsResultEvent{
 		TaskID:            task.TaskID,
 		OriginalURL:       task.OriginalURL,
 		OriginalFilePath:  task.OriginalFilePath,
-		ProcessedDataPath: task.ProcessedDataPath, // <--- ИСПРАВЛЕНИЕ: Передаем ProcessedDataPath дальше
-		KeywordsStored:    true,
+		ProcessedDataPath: task.ProcessedDataPath, // <--- Передаем ProcessedDataPath дальше
+		KeywordsStored:    true,                   // Симулируем, что ключевые слова сохранены
 		Success:           true,
 		Message:           "Successfully indexed keywords (simulated)",
 	}
 
+	// Публикуем результат
 	err := s.publisher.Publish(context.Background(), messaging.TasksExchange, messaging.IndexKeywordsResultRoutingKey, result)
 	if err != nil {
 		s.logger.Error("Failed to publish index keywords result", "error", err, "task_id", task.TaskID)
-		// В реальном приложении здесь может быть логика повторной отправки или обработки ошибки.
-		// Для MVP мы Ack'аем исходное сообщение, чтобы не блокировать очередь.
-		return nil
+		return nil // Ack исходного сообщения
 	}
 
-	s.logger.Info("Index keywords result published", "task_id", task.TaskID, "success", result.Success)
-	return nil
+	s.logger.Info("Index keywords result published",
+		"task_id", task.TaskID,
+		"success", result.Success,
+		"processed_data_path", result.ProcessedDataPath)
+	return nil // Успешная обработка -> Ack
 }
