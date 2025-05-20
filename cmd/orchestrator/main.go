@@ -3,21 +3,23 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	// Драйвер PostgreSQL должен быть импортирован для регистрации в database/sql.
-	_ "github.com/lib/pq"
+	_ "github.com/lib/pq" // Драйвер PostgreSQL
 
 	"github.com/rabbitmq/amqp091-go"
 	"github.com/semantica-dev/semantica-backend/internal/orchestrator/api"
 	"github.com/semantica-dev/semantica-backend/internal/orchestrator/listener"
 	"github.com/semantica-dev/semantica-backend/internal/orchestrator/publisher"
-	"github.com/semantica-dev/semantica-backend/pkg/config" // Используем наш обновленный пакет config
+	"github.com/semantica-dev/semantica-backend/pkg/config"
 	"github.com/semantica-dev/semantica-backend/pkg/database"
 	"github.com/semantica-dev/semantica-backend/pkg/logger"
 	"github.com/semantica-dev/semantica-backend/pkg/messaging"
@@ -28,14 +30,13 @@ func main() {
 	// 1. Загружаем конфигурацию в самом начале
 	cfg := config.LoadConfig()
 
-	// 2. Настраиваем логгер (можно будет добавить установку уровня из cfg.LogLevel)
+	// 2. Настраиваем логгер
 	appLogger := logger.New("orchestrator-service")
 	appLogger.Info("Starting Orchestrator service...")
-	// Логируем важные части конфигурации для отладки (не весь cfg, чтобы не светить пароли в проде)
 	appLogger.Info("Configuration loaded",
 		"rabbitmq_url", cfg.RabbitMQ_URL,
 		"orchestrator_api_port", cfg.OrchestratorAPIPort,
-		"postgres_dsn_set", cfg.PostgresDSN != "", // Показываем, задан ли DSN, а не сам DSN
+		"postgres_dsn_set", cfg.PostgresDSN != "",
 		"minio_endpoint", cfg.MinioEndpoint,
 		"minio_bucket", cfg.MinioBucketName,
 		"migrations_dir", cfg.MigrationsDir,
@@ -46,20 +47,18 @@ func main() {
 
 	// 3. Применение миграций базы данных
 	if cfg.PostgresDSN != "" {
-		// Путь к миграциям теперь берем из cfg.MigrationsDir
-		// В Dockerfile Оркестратора мы копируем ./db в /app/db,
-		// поэтому MIGRATIONS_DIR в docker-compose.yaml для Оркестратора должен быть /app/db/migrations
-		// (это значение по умолчанию в pkg/config, если не переопределено в .env)
 		if err := database.ApplyMigrations(appLogger, "postgres", cfg.PostgresDSN, cfg.MigrationsDir); err != nil {
 			appLogger.Error("Database migration failed. Exiting.", "error", err)
 			os.Exit(1)
 		}
 	} else {
 		appLogger.Warn("POSTGRES_DSN is not set. Orchestrator requires a database for storing task states and will likely fail or not function correctly.")
-		// os.Exit(1) // Раскомментировать, если БД критична для старта и DSN должен быть всегда
 	}
 
 	// 4. Инициализация Minio клиента и создание/проверка бакета
+	var minioClient *storage.MinioClient
+	var minioErr error
+
 	if cfg.MinioEndpoint != "" && cfg.MinioAccessKeyID != "" && cfg.MinioSecretAccessKey != "" && cfg.MinioBucketName != "" {
 		minioInternalCfg := storage.MinioConfig{
 			Endpoint:        cfg.MinioEndpoint,
@@ -71,16 +70,86 @@ func main() {
 		minioInitCtx, minioInitCancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer minioInitCancel()
 
-		_, err := storage.NewMinioClient(minioInitCtx, minioInternalCfg, appLogger)
-		if err != nil {
-			appLogger.Error("Failed to initialize Minio client or ensure bucket exists. Exiting.", "error", err)
+		minioClient, minioErr = storage.NewMinioClient(minioInitCtx, minioInternalCfg, appLogger)
+		if minioErr != nil {
+			appLogger.Error("Failed to initialize Minio client or ensure bucket exists. Exiting.", "error", minioErr)
 			os.Exit(1)
 		}
 		appLogger.Info("Minio client initialized and bucket ensured.", "bucket", cfg.MinioBucketName)
 	} else {
 		appLogger.Warn("Minio configuration is incomplete. Minio-dependent features may fail.")
-		// os.Exit(1); // Раскомментировать, если Minio критичен для старта
+		minioErr = fmt.Errorf("minio configuration incomplete")
 	}
+
+	// --- TEMPORARY MINIO CLIENT TEST (Upload and Get) ---
+	if minioErr == nil && minioClient != nil {
+		appLogger.Info("[TEMP_TEST] Starting Minio client operational test...")
+		testObjectName := "test/orchestrator_startup_check.txt"
+		testContent := "Minio client test from Orchestrator: OK at " + time.Now().Format(time.RFC3339Nano)
+		testContentType := "text/plain"
+		testTimeout := 10 * time.Second
+
+		// 1. Test Upload
+		uploadCtx, uploadCancel := context.WithTimeout(context.Background(), testTimeout)
+		defer uploadCancel()
+
+		reader := strings.NewReader(testContent)
+		contentLength := int64(len(testContent))
+
+		appLogger.Info("[TEMP_TEST] Attempting to upload test object...", "bucket", minioClient.GetBucketName(), "object", testObjectName)
+		_, err := minioClient.UploadObject(uploadCtx, testObjectName, reader, contentLength, testContentType)
+
+		if err != nil {
+			appLogger.Error("[TEMP_TEST] Failed to upload test object", "object", testObjectName, "error", err)
+		} else {
+			appLogger.Info("[TEMP_TEST] Test object uploaded successfully", "object", testObjectName)
+
+			// 2. Test Get (only if upload was successful for this test run)
+			getCtx, getCancel := context.WithTimeout(context.Background(), testTimeout)
+			defer getCancel()
+
+			appLogger.Info("[TEMP_TEST] Attempting to get test object...", "object", testObjectName)
+			obj, errGet := minioClient.GetObject(getCtx, testObjectName)
+
+			if errGet != nil {
+				appLogger.Error("[TEMP_TEST] Failed to get test object", "object", testObjectName, "error", errGet)
+			} else {
+				defer func() {
+					if errClose := obj.Close(); errClose != nil {
+						appLogger.Error("[TEMP_TEST] Failed to close Minio object reader", "object", testObjectName, "error", errClose)
+					}
+				}()
+
+				retrievedBytes, errRead := io.ReadAll(obj)
+				if errRead != nil {
+					appLogger.Error("[TEMP_TEST] Failed to read test object content", "object", testObjectName, "error", errRead)
+				} else {
+					retrievedContent := string(retrievedBytes)
+					if retrievedContent == testContent {
+						appLogger.Info("[TEMP_TEST] Test object retrieved and content verified successfully", "object", testObjectName, "content_length", len(retrievedContent))
+					} else {
+						expectedPrefix := testContent
+						if len(testContent) > 20 {
+							expectedPrefix = testContent[:20] + "..."
+						}
+						retrievedPrefix := retrievedContent
+						if len(retrievedContent) > 20 {
+							retrievedPrefix = retrievedContent[:20] + "..."
+						}
+						appLogger.Error("[TEMP_TEST] Test object content mismatch",
+							"object", testObjectName,
+							"expected_len", len(testContent), "got_len", len(retrievedContent),
+							"expected_prefix", expectedPrefix,
+							"got_prefix", retrievedPrefix)
+					}
+				}
+			}
+		}
+		appLogger.Info("[TEMP_TEST] Minio client operational test finished.")
+	} else {
+		appLogger.Warn("[TEMP_TEST] Skipping Minio client operational test due to initialization error or incomplete config.")
+	}
+	// --- END TEMPORARY MINIO CLIENT TEST ---
 
 	// 5. Инициализация RabbitMQ клиента
 	rmqClient, err := messaging.NewRabbitMQClient(
@@ -93,7 +162,6 @@ func main() {
 		appLogger.Error("Failed to initialize RabbitMQ client after all retries. Exiting.", "error", err)
 		os.Exit(1)
 	}
-	// defer rmqClient.Close() // Закрываем явно в конце main
 
 	// 6. Инициализация компонентов Оркестратора
 	taskPublisher := publisher.NewTaskPublisher(rmqClient, appLogger)
@@ -109,7 +177,7 @@ func main() {
 	})
 
 	server := &http.Server{
-		Addr:    cfg.OrchestratorAPIPort, // Используем порт из конфигурации
+		Addr:    cfg.OrchestratorAPIPort,
 		Handler: mux,
 	}
 
@@ -142,6 +210,7 @@ func main() {
 		{messaging.ConsumeOpts{QueueName: "orchestrator.index_keywords.results.queue", ExchangeName: messaging.TasksExchange, RoutingKey: messaging.IndexKeywordsResultRoutingKey, ConsumerTag: "orchestrator-index-keywords-result-consumer"}, taskListener.HandleIndexKeywordsResult},
 		{messaging.ConsumeOpts{QueueName: "orchestrator.index_embeddings.results.queue", ExchangeName: messaging.TasksExchange, RoutingKey: messaging.IndexEmbeddingsResultRoutingKey, ConsumerTag: "orchestrator-index-embeddings-result-consumer"}, taskListener.HandleIndexEmbeddingsResult},
 		{messaging.ConsumeOpts{QueueName: "orchestrator.task_finished.queue", ExchangeName: messaging.TasksExchange, RoutingKey: messaging.TaskProcessingFinishedRoutingKey, ConsumerTag: "orchestrator-task-finished-consumer"}, taskListener.HandleTaskProcessingFinished},
+		{messaging.ConsumeOpts{QueueName: "orchestrator.extract_other.results.queue", ExchangeName: messaging.TasksExchange, RoutingKey: messaging.ExtractOtherResultRoutingKey, ConsumerTag: "orchestrator-extract-other-result-consumer"}, taskListener.HandleExtractOtherResult},
 	}
 
 	for _, c := range consumers {
@@ -167,7 +236,7 @@ func main() {
 	}()
 
 	sig := <-shutdownSignal
-	appLogger.Info("Shutdown signal received.", "signal", sig.String(), "Initiating graceful shutdown...")
+	appLogger.Info("Shutdown signal received, initiating graceful shutdown", "signal", sig.String())
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
