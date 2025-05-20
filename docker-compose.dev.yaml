@@ -1,0 +1,256 @@
+# File: docker-compose.dev.yaml
+#
+# Этот файл используется для ускоренной разработки.
+# Он монтирует исходный код Go напрямую в контейнеры
+# и запускает Go-приложения с помощью 'go run',
+# избегая длительной пересборки Docker-образов для каждого изменения кода.
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: semantica-rabbitmq
+    ports:
+      - "${RABBITMQ_HOST_AMQP_PORT:-5672}:5672"
+      - "${RABBITMQ_HOST_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - semantica-rabbitmq-data:/var/lib/rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - semantica-network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: semantica-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - semantica-postgres-data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -q"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - semantica-network
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: semantica-minio
+    ports:
+      - "${MINIO_HOST_API_PORT:-9000}:9000"
+      - "${MINIO_HOST_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - semantica-minio-data:/data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - semantica-network
+
+  orchestrator:
+    container_name: semantica-orchestrator
+    image: golang:1.23-alpine # Используем стандартный образ Go
+    volumes:
+      - .:/app # Монтируем весь проект
+    working_dir: /app # Устанавливаем рабочую директорию
+    ports:
+      - "${ORCHESTRATOR_HOST_PORT:-8080}:8080"
+    environment:
+      RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/"
+      POSTGRES_DSN: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
+      MIGRATIONS_DIR: ${MIGRATIONS_DIR:-/app/db/migrations}
+      ORCHESTRATOR_API_PORT: ${ORCHESTRATOR_API_PORT:-:8080}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
+      APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
+    command: go run ./cmd/orchestrator/main.go # Запускаем напрямую из исходников
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - semantica-network
+
+  worker-crawler:
+    container_name: semantica-worker-crawler
+    image: golang:1.23-alpine
+    volumes:
+      - .:/app
+    working_dir: /app
+    environment:
+      RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/"
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
+      APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
+    command: go run ./cmd/worker-crawler/main.go
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - semantica-network
+
+  worker-extractor-html:
+    container_name: semantica-worker-extractor-html
+    image: golang:1.23-alpine
+    volumes:
+      - .:/app
+    working_dir: /app
+    environment:
+      RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/"
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
+      APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
+    command: go run ./cmd/worker-extractor-html/main.go
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - semantica-network
+
+  worker-extractor-other:
+    container_name: semantica-worker-extractor-other
+    image: golang:1.23-alpine
+    volumes:
+      - .:/app
+    working_dir: /app
+    environment:
+      RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/"
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
+      APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
+    command: go run ./cmd/worker-extractor-other/main.go
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - semantica-network
+
+  worker-indexer-keywords:
+    container_name: semantica-worker-indexer-keywords
+    image: golang:1.23-alpine
+    volumes:
+      - .:/app
+    working_dir: /app
+    environment:
+      RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/"
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
+      POSTGRES_DSN: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
+      APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
+    command: go run ./cmd/worker-indexer-keywords/main.go
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - semantica-network
+
+  worker-indexer-embeddings:
+    container_name: semantica-worker-indexer-embeddings
+    image: golang:1.23-alpine
+    volumes:
+      - .:/app
+    working_dir: /app
+    environment:
+      RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/"
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
+      # QDRANT_URL: "http://qdrant:6333" # Пока Qdrant не добавлен в dev-compose
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
+      APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
+    command: go run ./cmd/worker-indexer-embeddings/main.go
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      # qdrant:
+      #   condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - semantica-network
+
+volumes:
+  semantica-rabbitmq-data:
+    name: semantica-rabbitmq-data
+    driver: local
+  semantica-postgres-data:
+    name: semantica-postgres-data
+    driver: local
+  semantica-minio-data:
+    name: semantica-minio-data
+    driver: local
+
+networks:
+  semantica-network:
+    name: semantica-network
+    driver: bridge
