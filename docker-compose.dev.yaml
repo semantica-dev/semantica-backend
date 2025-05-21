@@ -43,7 +43,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 30s
     restart: unless-stopped
     networks:
       - semantica-network
@@ -65,7 +65,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 10s
+      start_period: 15s
     restart: unless-stopped
     networks:
       - semantica-network

@@ -86,14 +86,17 @@ func main() {
 				appLogger.Error("[TEMP_TEST] Failed to upload test object", "object", testObjectName, "error", errUpload)
 			} else {
 				appLogger.Info("[TEMP_TEST] Test object uploaded successfully", "object", testObjectName)
-				getCtx, getCancel := context.WithTimeout(context.Background(), testTimeout)
-				obj, errGet := minioClient.GetObject(getCtx, testObjectName)
-				getCancel()
+
+				readCtx, readCancel := context.WithTimeout(context.Background(), testTimeout) // Новый контекст для операции чтения
+				obj, errGet := minioClient.GetObject(readCtx, testObjectName)
 				if errGet != nil {
+					readCancel() // Не забываем отменить, если GetObject вернул ошибку
 					appLogger.Error("[TEMP_TEST] Failed to get test object", "object", testObjectName, "error", errGet)
 				} else {
 					retrievedBytes, errRead := io.ReadAll(obj)
-					obj.Close()
+					obj.Close()  // Закрываем объект сразу после чтения (или ошибки чтения)
+					readCancel() // Отменяем контекст после всех операций с ним
+
 					if errRead != nil {
 						appLogger.Error("[TEMP_TEST] Failed to read test object content", "object", testObjectName, "error", errRead)
 					} else if string(retrievedBytes) == testContent {
