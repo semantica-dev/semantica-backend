@@ -72,10 +72,10 @@ services:
 
   orchestrator:
     container_name: semantica-orchestrator
-    image: golang:1.23-alpine # Используем стандартный образ Go
+    image: golang:1.23-alpine
     volumes:
-      - .:/app # Монтируем весь проект
-    working_dir: /app # Устанавливаем рабочую директорию
+      - .:/app
+    working_dir: /app
     ports:
       - "${ORCHESTRATOR_HOST_PORT:-8080}:8080"
     environment:
@@ -88,10 +88,11 @@ services:
       MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG} # DEBUG for dev
+      LOG_FORMAT: ${LOG_FORMAT:-pretty} # pretty for dev
       APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
       APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
-    command: go run ./cmd/orchestrator/main.go # Запускаем напрямую из исходников
+    command: go run ./cmd/orchestrator/main.go
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -116,7 +117,8 @@ services:
       MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+      LOG_FORMAT: ${LOG_FORMAT:-pretty}
       APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
       APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
     command: go run ./cmd/worker-crawler/main.go
@@ -142,7 +144,8 @@ services:
       MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+      LOG_FORMAT: ${LOG_FORMAT:-pretty}
       APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
       APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
     command: go run ./cmd/worker-extractor-html/main.go
@@ -168,7 +171,8 @@ services:
       MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+      LOG_FORMAT: ${LOG_FORMAT:-pretty}
       APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
       APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
     command: go run ./cmd/worker-extractor-other/main.go
@@ -195,7 +199,8 @@ services:
       MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
       POSTGRES_DSN: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+      LOG_FORMAT: ${LOG_FORMAT:-pretty}
       APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
       APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
     command: go run ./cmd/worker-indexer-keywords/main.go
@@ -223,8 +228,9 @@ services:
       MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
-      # QDRANT_URL: "http://qdrant:6333" # Пока Qdrant не добавлен в dev-compose
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # QDRANT_URL: "http://qdrant:6333"
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+      LOG_FORMAT: ${LOG_FORMAT:-pretty}
       APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
       APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
     command: go run ./cmd/worker-indexer-embeddings/main.go

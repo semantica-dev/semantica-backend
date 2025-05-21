@@ -44,7 +44,7 @@ services:
       - semantica-network
 
   minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z # Используем конкретный релиз
     container_name: semantica-minio
     ports:
       - "${MINIO_HOST_API_PORT:-9000}:9000"
@@ -71,7 +71,7 @@ services:
       context: .
       dockerfile: ./build/orchestrator/Dockerfile
     ports:
-      - "${ORCHESTRATOR_HOST_PORT:-8080}:8080"
+      - "${ORCHESTRATOR_HOST_PORT:-8080}:8080" # Используем порт для Оркестратора из .env или по умолчанию
     environment:
       RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/"
       POSTGRES_DSN: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
@@ -83,6 +83,7 @@ services:
       MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
       APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
       APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
     depends_on:
@@ -109,13 +110,14 @@ services:
       MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
       APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
       APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
     depends_on:
       rabbitmq:
         condition: service_healthy
       minio:
-        condition: service_healthy
+        condition: service_healthy # Если краулер будет писать в Minio
     restart: unless-stopped
     networks:
       - semantica-network
@@ -133,6 +135,7 @@ services:
       MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
       APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
       APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
     depends_on:
@@ -157,6 +160,7 @@ services:
       MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
       APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
       APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
     depends_on:
@@ -182,6 +186,7 @@ services:
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
       POSTGRES_DSN: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
       APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
       APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
     depends_on:
@@ -207,8 +212,9 @@ services:
       MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-semantica-data}
-      # QDRANT_URL: "http://qdrant:6333"
+      # QDRANT_URL: "http://qdrant:6333" # Когда Qdrant будет добавлен
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
       APP_MAX_RETRIES: ${APP_MAX_RETRIES:-5}
       APP_RETRY_INTERVAL: ${APP_RETRY_INTERVAL:-5s}
     depends_on:
