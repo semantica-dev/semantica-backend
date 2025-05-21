@@ -2,24 +2,30 @@
 package main
 
 import (
+	"context" // Добавлено для Minio
+	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
+	"time" // Добавлено для Minio
 
+	"github.com/rabbitmq/amqp091-go"
 	"github.com/semantica-dev/semantica-backend/internal/worker/indexerembeddings"
 	"github.com/semantica-dev/semantica-backend/pkg/config"
 	"github.com/semantica-dev/semantica-backend/pkg/logger"
 	"github.com/semantica-dev/semantica-backend/pkg/messaging"
+	"github.com/semantica-dev/semantica-backend/pkg/storage" // Добавлено для Minio
 )
 
 func main() {
 	cfg := config.LoadConfig()
-
-	appLogger := logger.New("worker-indexer-embeddings-service", cfg.LogFormat, cfg.GetSlogLevel()) // <--- ИЗМЕНЕНИЕ ЗДЕСЬ
+	appLogger := logger.New("worker-indexer-embeddings-service", cfg.LogFormat, cfg.GetSlogLevel())
 	appLogger.Info("Starting Worker-Indexer-Embeddings service...")
 	appLogger.Info("Configuration loaded",
 		"rabbitmq_url", cfg.RabbitMQ_URL,
-		"minio_endpoint", cfg.MinioEndpoint, // Этот воркер будет читать из Minio
+		"minio_endpoint", cfg.MinioEndpoint, // Этот воркер будет работать с Minio
+		"minio_bucket", cfg.MinioBucketName,
 		// "qdrant_url", cfg.QdrantURL, // Когда добавим Qdrant
 		"log_level", cfg.LogLevel,
 		"log_format", cfg.LogFormat,
@@ -27,43 +33,107 @@ func main() {
 		"retry_interval", cfg.RetryInterval.String(),
 	)
 
+	// Инициализация Minio клиента
+	var minioClient *storage.MinioClient
+	var minioErr error
+	if cfg.MinioEndpoint != "" && cfg.MinioAccessKeyID != "" && cfg.MinioSecretAccessKey != "" && cfg.MinioBucketName != "" {
+		minioInternalCfg := storage.MinioConfig{
+			Endpoint:        cfg.MinioEndpoint,
+			AccessKeyID:     cfg.MinioAccessKeyID,
+			SecretAccessKey: cfg.MinioSecretAccessKey,
+			UseSSL:          cfg.MinioUseSSL,
+			BucketName:      cfg.MinioBucketName,
+		}
+		minioInitCtx, minioInitCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer minioInitCancel()
+		minioClient, minioErr = storage.NewMinioClient(minioInitCtx, minioInternalCfg, appLogger.With("component", "minio_client_init"))
+		if minioErr != nil {
+			appLogger.Error("Failed to initialize Minio client or ensure bucket exists. Exiting.", "error", minioErr)
+			os.Exit(1)
+		}
+		appLogger.Info("Minio client initialized and bucket ensured.", "bucket", cfg.MinioBucketName)
+	} else {
+		appLogger.Error("Minio configuration is incomplete. Worker-Indexer-Embeddings cannot function without Minio. Exiting.", "error", "incomplete Minio config")
+		os.Exit(1)
+	}
+
+	// TODO: Инициализация клиента Qdrant, когда он понадобится
+
 	rmqClient, err := messaging.NewRabbitMQClient(
 		cfg.RabbitMQ_URL,
-		appLogger.With("component", "rabbitmq_client"),
+		appLogger.With("component", "rabbitmq_client_setup"),
 		cfg.MaxRetries,
 		cfg.RetryInterval,
 	)
 	if err != nil {
-		appLogger.Error("Failed to initialize RabbitMQ client after all retries. Exiting.", "error", err)
+		appLogger.Error("Failed to initialize RabbitMQ client. Exiting.", "error", err)
 		os.Exit(1)
 	}
-	defer rmqClient.Close()
+	// defer rmqClient.Close()
 
-	service := indexerembeddings.NewIndexerEmbeddingsService(appLogger, rmqClient)
+	service := indexerembeddings.NewIndexerEmbeddingsService(appLogger, rmqClient, minioClient) // Передаем minioClient
 
-	consumeOpts := messaging.ConsumeOpts{
-		QueueName:    "tasks.index.embeddings.in.queue",
-		ExchangeName: messaging.TasksExchange,
-		RoutingKey:   messaging.IndexEmbeddingsTaskRoutingKey,
-		ConsumerTag:  "indexer-embeddings-consumer-1",
-	}
+	shutdownSignal := make(chan os.Signal, 1)
+	signal.Notify(shutdownSignal, syscall.SIGINT, syscall.SIGTERM)
 
-	appLogger.Info("Setting up consumer...", "queue", consumeOpts.QueueName, "routing_key", consumeOpts.RoutingKey)
-	done := make(chan os.Signal, 1)
-	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
+	var wg sync.WaitGroup
 
-	go func() {
-		if err := rmqClient.Consume(consumeOpts, service.HandleTask); err != nil {
-			appLogger.Error("RabbitMQ consumer failed and stopped.", "error", err)
+	startSingleConsumer := func(
+		client *messaging.RabbitMQClient,
+		opts messaging.ConsumeOpts,
+		handler func(delivery amqp091.Delivery) error,
+		consumerLogger *slog.Logger,
+	) {
+		defer wg.Done()
+		logger := consumerLogger.With("queue", opts.QueueName, "consumer_tag", opts.ConsumerTag)
+		for {
+			logger.Info("Attempting to start consumer...")
+			consumeErr := client.Consume(opts, handler)
+			logger.Info("Consumer has stopped.", "error_if_any", consumeErr)
 			select {
-			case done <- syscall.SIGABRT:
+			case <-shutdownSignal:
+				logger.Info("Shutdown signal received. Exiting consumer loop.")
+				return
 			default:
 			}
+			if consumeErr != nil {
+				logger.Error("Consumer failed. Will attempt to restart after a delay.", "error", consumeErr)
+			} else {
+				logger.Info("Consumer exited gracefully or connection was closed externally. Checking for shutdown signal before potential restart.")
+			}
+			select {
+			case <-shutdownSignal:
+				logger.Info("Shutdown signal received during restart delay. Exiting consumer loop.")
+				return
+			case <-time.After(cfg.RetryInterval):
+				logger.Info("Delay finished. Proceeding to restart consumer.")
+			}
 		}
-	}()
+	}
+
+	appLogger.Info("Starting Worker-Indexer-Embeddings consumer...")
+	wg.Add(1)
+	go startSingleConsumer(
+		rmqClient,
+		messaging.ConsumeOpts{
+			QueueName:    "tasks.index.embeddings.in.queue",
+			ExchangeName: messaging.TasksExchange,
+			RoutingKey:   messaging.IndexEmbeddingsTaskRoutingKey,
+			ConsumerTag:  "indexer-embeddings-consumer-1",
+		},
+		service.HandleTask,
+		appLogger,
+	)
 
 	appLogger.Info("Worker-Indexer-Embeddings service is now running. Press CTRL+C to exit.")
-	sig := <-done
-	appLogger.Info("Received signal, shutting down Worker-Indexer-Embeddings service...", "signal", sig.String())
-	appLogger.Info("Worker-Indexer-Embeddings service shut down.")
+	sig := <-shutdownSignal
+	appLogger.Info("Shutdown signal received, initiating graceful shutdown", "signal", sig.String())
+
+	appLogger.Info("Closing RabbitMQ client connection to signal consumer to stop...")
+	rmqClient.Close()
+
+	appLogger.Info("Waiting for consumer to finish...")
+	wg.Wait()
+
+	appLogger.Info("Worker-Indexer-Embeddings service shut down gracefully.")
 }

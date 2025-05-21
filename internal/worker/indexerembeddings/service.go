@@ -10,17 +10,28 @@ import (
 
 	"github.com/rabbitmq/amqp091-go"
 	"github.com/semantica-dev/semantica-backend/pkg/messaging"
+	"github.com/semantica-dev/semantica-backend/pkg/storage" // Убедимся, что импорт есть
+	// qdrantClient "github.com/qdrant/go-client/qdrant" // Понадобится для Qdrant
 )
 
 type IndexerEmbeddingsService struct {
-	logger    *slog.Logger
-	publisher *messaging.RabbitMQClient
+	logger      *slog.Logger
+	publisher   *messaging.RabbitMQClient
+	minioClient *storage.MinioClient // <--- ДОБАВЛЕНО ПОЛЕ
+	// qdrantClient *qdrant.PointsClient // Для Qdrant
 }
 
-func NewIndexerEmbeddingsService(logger *slog.Logger, publisher *messaging.RabbitMQClient) *IndexerEmbeddingsService {
+func NewIndexerEmbeddingsService(
+	logger *slog.Logger,
+	publisher *messaging.RabbitMQClient,
+	minioClient *storage.MinioClient, // <--- ДОБАВЛЕН АРГУМЕНТ
+	// qdrantClient *qdrant.PointsClient, // Для Qdrant
+) *IndexerEmbeddingsService {
 	return &IndexerEmbeddingsService{
-		logger:    logger.With("component", "indexer_embeddings_service"),
-		publisher: publisher,
+		logger:      logger.With("component", "indexer_embeddings_service"),
+		publisher:   publisher,
+		minioClient: minioClient, // <--- ПРИСВОЕНО ПОЛЕ
+		// qdrantClient: qdrantClient,
 	}
 }
 
@@ -28,43 +39,47 @@ func (s *IndexerEmbeddingsService) HandleTask(delivery amqp091.Delivery) error {
 	var task messaging.IndexEmbeddingsTaskEvent
 	if err := json.Unmarshal(delivery.Body, &task); err != nil {
 		s.logger.Error("Failed to unmarshal index embeddings task event", "error", err, "body", string(delivery.Body))
-		return err // Nack
+		return fmt.Errorf("unmarshal IndexEmbeddingsTaskEvent: %w", err)
 	}
 
 	s.logger.Info("Received index embeddings task",
 		"task_id", task.TaskID,
 		"original_url", task.OriginalURL,
 		"original_file_path", task.OriginalFilePath,
-		"processed_data_path", task.ProcessedDataPath) // Логируем полученный ProcessedDataPath
+		"processed_data_path", task.ProcessedDataPath)
 
-	// Имитация работы индексатора эмбеддингов
-	s.logger.Info("Simulating embedding generation and indexing...",
-		"task_id", task.TaskID,
-		"input_processed_path", task.ProcessedDataPath) // Указываем, какой файл "обрабатываем"
-	time.Sleep(3 * time.Second) // Имитация работы (может быть дольше)
-	s.logger.Info("Embedding indexing simulation finished", "task_id", task.TaskID)
-
-	// Формируем результат для этого этапа
 	result := messaging.IndexEmbeddingsResultEvent{
 		TaskID:            task.TaskID,
 		OriginalURL:       task.OriginalURL,
 		OriginalFilePath:  task.OriginalFilePath,
-		ProcessedDataPath: task.ProcessedDataPath, // <--- Передаем ProcessedDataPath дальше
-		EmbeddingsStored:  true,                   // Симулируем, что эмбеддинги сохранены
-		Success:           true,
-		Message:           "Successfully indexed embeddings (simulated)",
+		ProcessedDataPath: task.ProcessedDataPath, // Важно передать
+		Success:           false,
 	}
 
+	// TODO: Реальная логика чтения обработанного текста/markdown из Minio по task.ProcessedDataPath
+	// TODO: Реальная логика разбиения на чанки, генерации эмбеддингов и сохранения их в Qdrant (и метаданных в PostgreSQL)
+
+	s.logger.Info("Simulating embedding generation and indexing...",
+		"task_id", task.TaskID,
+		"input_processed_path", task.ProcessedDataPath)
+	time.Sleep(3 * time.Second)
+	s.logger.Info("Embedding indexing simulation finished", "task_id", task.TaskID)
+
+	result.EmbeddingsStored = true // Симулируем
+	result.Success = true
+	result.Message = "Successfully indexed embeddings (simulated)"
+
 	// Публикуем результат этапа индексации эмбеддингов
-	err := s.publisher.Publish(context.Background(), messaging.TasksExchange, messaging.IndexEmbeddingsResultRoutingKey, result)
-	if err != nil {
-		s.logger.Error("Failed to publish index embeddings result", "error", err, "task_id", task.TaskID)
-		// Продолжаем, чтобы опубликовать TaskProcessingFinishedEvent, но логируем ошибку
+	pubErr := s.publisher.Publish(context.Background(), messaging.TasksExchange, messaging.IndexEmbeddingsResultRoutingKey, result)
+	if pubErr != nil {
+		s.logger.Error("Failed to publish index embeddings result", "error", pubErr, "task_id", task.TaskID)
+		// Не прерываем, пытаемся отправить TaskProcessingFinishedEvent
 	} else {
 		s.logger.Info("Index embeddings result published",
-			"task_id", task.TaskID,
+			"task_id", result.TaskID,
 			"success", result.Success,
-			"processed_data_path", result.ProcessedDataPath)
+			"processed_data_path", result.ProcessedDataPath,
+			"message", result.Message)
 	}
 
 	// Публикуем событие о завершении всей цепочки обработки данных
@@ -73,7 +88,7 @@ func (s *IndexerEmbeddingsService) HandleTask(delivery amqp091.Delivery) error {
 		OriginalURL:      task.OriginalURL,
 		OriginalFilePath: task.OriginalFilePath,
 		OverallSuccess:   result.Success, // Успех этого этапа определяет общий успех (пока что)
-		FinalMessage:     fmt.Sprintf("Processing chain finished (simulated). Embeddings stored: %t", result.Success),
+		FinalMessage:     fmt.Sprintf("Processing chain finished (simulated). Embeddings stored: %t", result.EmbeddingsStored),
 	}
 	errFinished := s.publisher.Publish(context.Background(), messaging.TasksExchange, messaging.TaskProcessingFinishedRoutingKey, finishedEvent)
 	if errFinished != nil {
@@ -82,8 +97,11 @@ func (s *IndexerEmbeddingsService) HandleTask(delivery amqp091.Delivery) error {
 		s.logger.Info("Task processing finished event published", "task_id", task.TaskID, "overall_success", finishedEvent.OverallSuccess)
 	}
 
-	// Возвращаем nil, чтобы подтвердить (Ack) исходное сообщение IndexEmbeddingsTaskEvent,
-	// даже если публикация одного из результатов не удалась (чтобы не блокировать очередь).
-	// В реальной системе может потребоваться более сложная логика обработки ошибок публикации.
+	// Подтверждаем исходное сообщение IndexEmbeddingsTaskEvent
+	if ackErr := delivery.Ack(false); ackErr != nil {
+		s.logger.Error("Failed to acknowledge original index embeddings task message", "delivery_tag", delivery.DeliveryTag, "task_id", task.TaskID, "error", ackErr)
+		return fmt.Errorf("failed to Ack index embeddings message (tag %d): %w", delivery.DeliveryTag, ackErr)
+	}
+	s.logger.Debug("Original index embeddings task message acknowledged successfully", "delivery_tag", delivery.DeliveryTag, "task_id", task.TaskID)
 	return nil
 }
