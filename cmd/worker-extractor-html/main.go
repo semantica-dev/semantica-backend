@@ -5,26 +5,26 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	// "time"
 
 	"github.com/semantica-dev/semantica-backend/internal/worker/extractorhtml"
-	"github.com/semantica-dev/semantica-backend/pkg/config" // Используем наш пакет config
+	"github.com/semantica-dev/semantica-backend/pkg/config"
 	"github.com/semantica-dev/semantica-backend/pkg/logger"
 	"github.com/semantica-dev/semantica-backend/pkg/messaging"
 )
 
 func main() {
-	cfg := config.LoadConfig() // 1. Загружаем конфигурацию
+	cfg := config.LoadConfig()
 
-	appLogger := logger.New("worker-extractor-html-service") // 2. Инициализируем логгер
+	appLogger := logger.New("worker-extractor-html-service", cfg.LogFormat, cfg.GetSlogLevel()) // <--- ИЗМЕНЕНИЕ ЗДЕСЬ
 	appLogger.Info("Starting Worker-Extractor-HTML service...")
 	appLogger.Info("Configuration loaded",
 		"rabbitmq_url", cfg.RabbitMQ_URL,
+		"log_level", cfg.LogLevel,
+		"log_format", cfg.LogFormat,
 		"max_retries", cfg.MaxRetries,
 		"retry_interval", cfg.RetryInterval.String(),
 	)
 
-	// 3. Используем значения из cfg для RabbitMQ
 	rmqClient, err := messaging.NewRabbitMQClient(
 		cfg.RabbitMQ_URL,
 		appLogger.With("component", "rabbitmq_client"),
@@ -37,7 +37,6 @@ func main() {
 	}
 	defer rmqClient.Close()
 
-	// 4. Остальная логика
 	service := extractorhtml.NewExtractorHTMLService(appLogger, rmqClient)
 
 	consumeOpts := messaging.ConsumeOpts{

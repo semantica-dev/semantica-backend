@@ -5,27 +5,24 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	// "time"
-
-	// Драйвер PostgreSQL, если этот воркер будет сам подключаться к БД для записи ключевых слов
-	// _ "github.com/lib/pq" // Пока не нужен, т.к. реальной записи в БД нет
 
 	"github.com/semantica-dev/semantica-backend/internal/worker/indexerkeywords"
-	"github.com/semantica-dev/semantica-backend/pkg/config" // Используем наш пакет config
+	"github.com/semantica-dev/semantica-backend/pkg/config"
 	"github.com/semantica-dev/semantica-backend/pkg/logger"
 	"github.com/semantica-dev/semantica-backend/pkg/messaging"
-	// "github.com/semantica-dev/semantica-backend/pkg/database" // Если бы он применял свои миграции
 )
 
 func main() {
-	cfg := config.LoadConfig() // 1. Загружаем конфигурацию
+	cfg := config.LoadConfig()
 
-	appLogger := logger.New("worker-indexer-keywords-service") // 2. Инициализируем логгер
+	appLogger := logger.New("worker-indexer-keywords-service", cfg.LogFormat, cfg.GetSlogLevel()) // <--- ИЗМЕНЕНИЕ ЗДЕСЬ
 	appLogger.Info("Starting Worker-Indexer-Keywords service...")
 	appLogger.Info("Configuration loaded",
 		"rabbitmq_url", cfg.RabbitMQ_URL,
 		"minio_endpoint", cfg.MinioEndpoint, // Этот воркер будет читать из Minio
 		"postgres_dsn_set", cfg.PostgresDSN != "", // Этот воркер будет писать в PostgreSQL
+		"log_level", cfg.LogLevel,
+		"log_format", cfg.LogFormat,
 		"max_retries", cfg.MaxRetries,
 		"retry_interval", cfg.RetryInterval.String(),
 	)
@@ -52,9 +49,7 @@ func main() {
 	}
 	defer rmqClient.Close()
 
-	// 4. Остальная логика
-	// Пока NewIndexerKeywordsService не принимает *sql.DB, но в будущем будет
-	service := indexerkeywords.NewIndexerKeywordsService(appLogger, rmqClient /*, db */)
+	service := indexerkeywords.NewIndexerKeywordsService(appLogger, rmqClient)
 
 	consumeOpts := messaging.ConsumeOpts{
 		QueueName:    "tasks.index.keywords.in.queue",

@@ -30,8 +30,8 @@ func main() {
 	// 1. Загружаем конфигурацию в самом начале
 	cfg := config.LoadConfig()
 
-	// 2. Настраиваем логгер
-	appLogger := logger.New("orchestrator-service")
+	// 2. Настраиваем логгер с использованием формата и уровня из конфигурации
+	appLogger := logger.New("orchestrator-service", cfg.LogFormat, cfg.GetSlogLevel())
 	appLogger.Info("Starting Orchestrator service...")
 	appLogger.Info("Configuration loaded",
 		"rabbitmq_url", cfg.RabbitMQ_URL,
@@ -41,6 +41,7 @@ func main() {
 		"minio_bucket", cfg.MinioBucketName,
 		"migrations_dir", cfg.MigrationsDir,
 		"log_level", cfg.LogLevel,
+		"log_format", cfg.LogFormat,
 		"max_retries", cfg.MaxRetries,
 		"retry_interval", cfg.RetryInterval.String(),
 	)
@@ -89,7 +90,6 @@ func main() {
 		testContentType := "text/plain"
 		testTimeout := 10 * time.Second
 
-		// 1. Test Upload
 		uploadCtx, uploadCancel := context.WithTimeout(context.Background(), testTimeout)
 		defer uploadCancel()
 
@@ -104,7 +104,6 @@ func main() {
 		} else {
 			appLogger.Info("[TEMP_TEST] Test object uploaded successfully", "object", testObjectName)
 
-			// 2. Test Get (only if upload was successful for this test run)
 			getCtx, getCancel := context.WithTimeout(context.Background(), testTimeout)
 			defer getCancel()
 
@@ -151,7 +150,6 @@ func main() {
 	}
 	// --- END TEMPORARY MINIO CLIENT TEST ---
 
-	// 5. Инициализация RabbitMQ клиента
 	rmqClient, err := messaging.NewRabbitMQClient(
 		cfg.RabbitMQ_URL,
 		appLogger.With("component", "rabbitmq_client"),
@@ -163,12 +161,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 6. Инициализация компонентов Оркестратора
 	taskPublisher := publisher.NewTaskPublisher(rmqClient, appLogger)
 	taskAPIHandler := api.NewTaskAPIHandler(appLogger, taskPublisher)
 	taskListener := listener.NewTaskListener(appLogger, taskPublisher)
 
-	// 7. Настройка HTTP сервера
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/tasks/crawl", taskAPIHandler.CreateCrawlTaskHandler)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -181,7 +177,6 @@ func main() {
 		Handler: mux,
 	}
 
-	// 8. Запуск слушателей RabbitMQ (консьюмеров)
 	var wg sync.WaitGroup
 	startConsumer := func(consumerOpts messaging.ConsumeOpts, handlerFunc func(delivery amqp091.Delivery) error) {
 		defer wg.Done()
@@ -218,7 +213,6 @@ func main() {
 		go startConsumer(c.opts, c.handler)
 	}
 
-	// 9. Настройка грациозного завершения
 	shutdownSignal := make(chan os.Signal, 1)
 	signal.Notify(shutdownSignal, syscall.SIGINT, syscall.SIGTERM)
 	httpServerDone := make(chan struct{})

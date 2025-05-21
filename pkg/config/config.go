@@ -2,8 +2,10 @@
 package config
 
 import (
+	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -29,7 +31,8 @@ type Config struct {
 	MigrationsDir string // Путь к директории с файлами миграций
 
 	// Общие настройки для Go-сервисов
-	LogLevel      string        // Уровень логирования, например "INFO", "DEBUG"
+	LogLevel      string        // Уровень логирования, например "INFO", "DEBUG", "WARN", "ERROR"
+	LogFormat     string        // Формат логирования: "json" или "pretty"
 	MaxRetries    int           // Максимальное количество попыток для retry-механизмов
 	RetryInterval time.Duration // Интервал между попытками
 }
@@ -73,32 +76,46 @@ func getEnvAsDuration(key string, fallback time.Duration) time.Duration {
 // Значения по умолчанию указаны для удобства локального запуска с docker-compose,
 // где имена сервисов (например, "rabbitmq", "postgres", "minio") резолвятся во внутренние IP Docker-сети.
 func LoadConfig() *Config {
-	// Для строк подключения и DSN значения по умолчанию лучше оставить пустыми или минимальными,
-	// так как они сильно зависят от кредов, которые должны быть заданы в .env.
-	// Docker Compose сам сформирует эти строки и передаст их как переменные окружения.
 	return &Config{
 		// RabbitMQ
-		RabbitMQ_URL: getEnv("RABBITMQ_URL", ""), // Будет сформирован в docker-compose.yaml
+		RabbitMQ_URL: getEnv("RABBITMQ_URL", ""),
 
 		// Orchestrator
 		OrchestratorAPIPort: getEnv("ORCHESTRATOR_API_PORT", ":8080"),
 
 		// PostgreSQL
-		PostgresDSN: getEnv("POSTGRES_DSN", ""), // Будет сформирован в docker-compose.yaml
+		PostgresDSN: getEnv("POSTGRES_DSN", ""),
 
 		// Minio
-		MinioEndpoint:        getEnv("MINIO_ENDPOINT", "minio:9000"), // Ожидается "хост:порт"
-		MinioAccessKeyID:     getEnv("MINIO_ACCESS_KEY_ID", ""),      // Будет взят из MINIO_ROOT_USER в docker-compose
-		MinioSecretAccessKey: getEnv("MINIO_SECRET_ACCESS_KEY", ""),  // Будет взят из MINIO_ROOT_PASSWORD в docker-compose
+		MinioEndpoint:        getEnv("MINIO_ENDPOINT", "minio:9000"),
+		MinioAccessKeyID:     getEnv("MINIO_ACCESS_KEY_ID", ""),
+		MinioSecretAccessKey: getEnv("MINIO_SECRET_ACCESS_KEY", ""),
 		MinioUseSSL:          getEnvAsBool("MINIO_USE_SSL", false),
 		MinioBucketName:      getEnv("MINIO_BUCKET_NAME", "semantica-data"),
 
 		// Migrations
-		MigrationsDir: getEnv("MIGRATIONS_DIR", "/app/db/migrations"), // Путь внутри контейнера
+		MigrationsDir: getEnv("MIGRATIONS_DIR", "/app/db/migrations"),
 
 		// Общие
 		LogLevel:      getEnv("LOG_LEVEL", "INFO"),
+		LogFormat:     getEnv("LOG_FORMAT", "json"), // Default to "json"
 		MaxRetries:    getEnvAsInt("APP_MAX_RETRIES", 5),
 		RetryInterval: getEnvAsDuration("APP_RETRY_INTERVAL", 5*time.Second),
+	}
+}
+
+// GetSlogLevel converts string log level (e.g., "INFO", "DEBUG") to slog.Level.
+func (c *Config) GetSlogLevel() slog.Level {
+	switch strings.ToLower(c.LogLevel) {
+	case "debug":
+		return slog.LevelDebug
+	case "info":
+		return slog.LevelInfo
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo // Default to info if unknown or empty
 	}
 }
