@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"mime" // <--- Убедись, что этот импорт есть
+	"mime"
 	"net/http"
 	"time"
 
@@ -40,7 +40,8 @@ func (s *CrawlService) HandleTask(delivery amqp091.Delivery) error {
 	var task messaging.CrawlTaskEvent
 	if err := json.Unmarshal(delivery.Body, &task); err != nil {
 		s.logger.Error("Failed to unmarshal crawl task event", "error", err, "body", string(delivery.Body))
-		return err
+		// Важно вернуть ошибку, чтобы сообщение не было Ack'нуто по умолчанию и могло быть Nack'нуто или переотправлено
+		return fmt.Errorf("unmarshal CrawlTaskEvent: %w", err)
 	}
 
 	s.logger.Info("Received crawl task", "task_id", task.TaskID, "url", task.URL)
@@ -95,7 +96,6 @@ func (s *CrawlService) HandleTask(delivery amqp091.Delivery) error {
 	} else if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	// Если mime.ParseMediaType вернул ошибку, оставляем оригинальный contentType, если он не пустой
 
 	uploadCtx, uploadCancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer uploadCancel()
@@ -118,20 +118,22 @@ func (s *CrawlService) HandleTask(delivery amqp091.Delivery) error {
 func (s *CrawlService) publishResultAndAck(result messaging.CrawlResultEvent, delivery amqp091.Delivery) error {
 	pubErr := s.publisher.Publish(context.Background(), messaging.TasksExchange, messaging.CrawlResultRoutingKey, result)
 	if pubErr != nil {
-		s.logger.Error("Failed to publish crawl result", "error", pubErr, "task_id", result.TaskID, "success", result.Success)
-		// Логируем, но не останавливаем попытку Ack, т.к. исходное сообщение нужно обработать
+		s.logger.Error("Failed to publish crawl result", "error", pubErr, "task_id", result.TaskID)
+		// Если публикация не удалась, мы все равно должны попытаться Ack'нуть исходное сообщение,
+		// чтобы оно не обрабатывалось повторно, если проблема была временной.
+		// Однако, если сама публикация является критической частью, можно рассмотреть Nack.
+		// Для текущей логики, где Ack делается в любом случае (если не было ошибки до этого),
+		// продолжаем и пытаемся Ack'нуть.
 	} else {
 		s.logger.Info("Crawl result published", "task_id", result.TaskID, "success", result.Success, "raw_data_path", result.RawDataPath, "message", result.Message)
 	}
 
+	s.logger.Debug("Attempting to acknowledge original message in CrawlService", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID)
 	if ackErr := delivery.Ack(false); ackErr != nil {
-		s.logger.Error("Failed to acknowledge original message", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID, "error", ackErr)
-		// Не возвращаем ошибку ackErr здесь.
-		// Если Ack не удался, сообщение, вероятно, будет переотправлено RabbitMQ.
-		// Консьюмер, скорее всего, остановится из-за ошибки канала.
-		// Но мы не хотим, чтобы rmqClient.Consume пытался сделать Nack поверх этого.
-		return nil // Возвращаем nil, чтобы внешний rmqClient.Consume не пытался сделать Nack
+		s.logger.Error("Failed to acknowledge original message in CrawlService", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID, "error", ackErr)
+		// Возвращаем ошибку, чтобы rmqClient.Consume мог ее обработать
+		return fmt.Errorf("failed to Ack message (tag %d) in CrawlService: %w", delivery.DeliveryTag, ackErr)
 	}
-	s.logger.Debug("Original message acknowledged successfully", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID)
+	s.logger.Info("Successfully acknowledged original message in CrawlService", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID)
 	return nil
 }

@@ -2,29 +2,30 @@
 package main
 
 import (
-	"context" // Добавлено для Minio, если понадобится при инициализации (здесь используется)
+	"context"
 	"log/slog"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
-	"time" // Добавлено для Minio
+	"time"
 
 	"github.com/rabbitmq/amqp091-go"
 	"github.com/semantica-dev/semantica-backend/internal/worker/extractorhtml"
 	"github.com/semantica-dev/semantica-backend/pkg/config"
 	"github.com/semantica-dev/semantica-backend/pkg/logger"
 	"github.com/semantica-dev/semantica-backend/pkg/messaging"
-	"github.com/semantica-dev/semantica-backend/pkg/storage" // Добавлено для Minio
+	"github.com/semantica-dev/semantica-backend/pkg/storage"
 )
 
 func main() {
 	cfg := config.LoadConfig()
-	appLogger := logger.New("worker-extractor-html-service", cfg.LogFormat, cfg.GetSlogLevel())
-	appLogger.Info("Starting Worker-Extractor-HTML service...")
+	serviceName := "worker-extractor-html-service"
+	appLogger := logger.New(serviceName, cfg.LogFormat, cfg.GetSlogLevel())
+	appLogger.Info("Starting service...", "name", serviceName)
 	appLogger.Info("Configuration loaded",
 		"rabbitmq_url", cfg.RabbitMQ_URL,
-		"minio_endpoint", cfg.MinioEndpoint, // Этот воркер будет работать с Minio
+		"minio_endpoint", cfg.MinioEndpoint,
 		"minio_bucket", cfg.MinioBucketName,
 		"log_level", cfg.LogLevel,
 		"log_format", cfg.LogFormat,
@@ -32,27 +33,24 @@ func main() {
 		"retry_interval", cfg.RetryInterval.String(),
 	)
 
-	// Инициализация Minio клиента (аналогично crawler)
 	var minioClient *storage.MinioClient
 	var minioErr error
 	if cfg.MinioEndpoint != "" && cfg.MinioAccessKeyID != "" && cfg.MinioSecretAccessKey != "" && cfg.MinioBucketName != "" {
 		minioInternalCfg := storage.MinioConfig{
-			Endpoint:        cfg.MinioEndpoint,
-			AccessKeyID:     cfg.MinioAccessKeyID,
-			SecretAccessKey: cfg.MinioSecretAccessKey,
-			UseSSL:          cfg.MinioUseSSL,
-			BucketName:      cfg.MinioBucketName,
+			Endpoint: cfg.MinioEndpoint, AccessKeyID: cfg.MinioAccessKeyID,
+			SecretAccessKey: cfg.MinioSecretAccessKey, UseSSL: cfg.MinioUseSSL,
+			BucketName: cfg.MinioBucketName,
 		}
 		minioInitCtx, minioInitCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer minioInitCancel()
 		minioClient, minioErr = storage.NewMinioClient(minioInitCtx, minioInternalCfg, appLogger.With("component", "minio_client_init"))
 		if minioErr != nil {
-			appLogger.Error("Failed to initialize Minio client or ensure bucket exists. Exiting.", "error", minioErr)
+			appLogger.Error("Failed to initialize Minio client. Exiting.", "error", minioErr)
 			os.Exit(1)
 		}
-		appLogger.Info("Minio client initialized and bucket ensured.", "bucket", cfg.MinioBucketName)
+		appLogger.Info("Minio client initialized.", "bucket", cfg.MinioBucketName)
 	} else {
-		appLogger.Error("Minio configuration is incomplete. Worker-Extractor-HTML cannot function without Minio. Exiting.", "error", "incomplete Minio config")
+		appLogger.Error("Minio configuration incomplete. Exiting.", "error", "incomplete Minio config")
 		os.Exit(1)
 	}
 
@@ -66,14 +64,11 @@ func main() {
 		appLogger.Error("Failed to initialize RabbitMQ client. Exiting.", "error", err)
 		os.Exit(1)
 	}
-	// defer rmqClient.Close()
 
-	// Передаем minioClient в конструктор сервиса
 	service := extractorhtml.NewExtractorHTMLService(appLogger, rmqClient, minioClient)
 
 	shutdownSignal := make(chan os.Signal, 1)
 	signal.Notify(shutdownSignal, syscall.SIGINT, syscall.SIGTERM)
-
 	var wg sync.WaitGroup
 
 	startSingleConsumer := func(
@@ -109,7 +104,7 @@ func main() {
 		}
 	}
 
-	appLogger.Info("Starting Worker-Extractor-HTML consumer...")
+	appLogger.Info("Starting consumer...", "service", serviceName)
 	wg.Add(1)
 	go startSingleConsumer(
 		rmqClient,
@@ -117,21 +112,32 @@ func main() {
 			QueueName:    "tasks.extract.html.in.queue",
 			ExchangeName: messaging.TasksExchange,
 			RoutingKey:   messaging.ExtractHTMLTaskRoutingKey,
-			ConsumerTag:  "extractor-html-consumer-1",
+			ConsumerTag:  serviceName + "-consumer-1",
 		},
 		service.HandleTask,
 		appLogger,
 	)
 
-	appLogger.Info("Worker-Extractor-HTML service is now running. Press CTRL+C to exit.")
+	appLogger.Info("Service is now running. Press CTRL+C to exit.", "name", serviceName)
 	sig := <-shutdownSignal
-	appLogger.Info("Shutdown signal received, initiating graceful shutdown", "signal", sig.String())
+	appLogger.Info("Shutdown signal received, initiating graceful shutdown", "signal", sig.String(), "service", serviceName)
 
-	appLogger.Info("Closing RabbitMQ client connection to signal consumer to stop...")
+	appLogger.Info("Closing RabbitMQ client connection to signal consumer to stop...", "service", serviceName)
 	rmqClient.Close()
 
-	appLogger.Info("Waiting for consumer to finish...")
-	wg.Wait()
+	appLogger.Info("Waiting for consumer to finish (up to 5s)...", "service", serviceName)
+	waitGroupDone := make(chan struct{})
+	go func() {
+		defer close(waitGroupDone)
+		wg.Wait()
+	}()
 
-	appLogger.Info("Worker-Extractor-HTML service shut down gracefully.")
+	select {
+	case <-waitGroupDone:
+		appLogger.Info("Consumer finished gracefully.", "service", serviceName)
+	case <-time.After(5 * time.Second):
+		appLogger.Warn("Timeout waiting for consumer to finish. Proceeding with shutdown.", "service", serviceName)
+	}
+
+	appLogger.Info("Service shut down gracefully.", "name", serviceName)
 }

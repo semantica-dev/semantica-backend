@@ -20,8 +20,9 @@ import (
 
 func main() {
 	cfg := config.LoadConfig()
-	appLogger := logger.New("worker-crawler-service", cfg.LogFormat, cfg.GetSlogLevel())
-	appLogger.Info("Starting Worker-Crawler service...")
+	serviceName := "worker-crawler-service"
+	appLogger := logger.New(serviceName, cfg.LogFormat, cfg.GetSlogLevel())
+	appLogger.Info("Starting service...", "name", serviceName)
 	appLogger.Info("Configuration loaded",
 		"rabbitmq_url", cfg.RabbitMQ_URL,
 		"minio_endpoint", cfg.MinioEndpoint,
@@ -36,22 +37,20 @@ func main() {
 	var minioErr error
 	if cfg.MinioEndpoint != "" && cfg.MinioAccessKeyID != "" && cfg.MinioSecretAccessKey != "" && cfg.MinioBucketName != "" {
 		minioInternalCfg := storage.MinioConfig{
-			Endpoint:        cfg.MinioEndpoint,
-			AccessKeyID:     cfg.MinioAccessKeyID,
-			SecretAccessKey: cfg.MinioSecretAccessKey,
-			UseSSL:          cfg.MinioUseSSL,
-			BucketName:      cfg.MinioBucketName,
+			Endpoint: cfg.MinioEndpoint, AccessKeyID: cfg.MinioAccessKeyID,
+			SecretAccessKey: cfg.MinioSecretAccessKey, UseSSL: cfg.MinioUseSSL,
+			BucketName: cfg.MinioBucketName,
 		}
 		minioInitCtx, minioInitCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer minioInitCancel()
 		minioClient, minioErr = storage.NewMinioClient(minioInitCtx, minioInternalCfg, appLogger.With("component", "minio_client_init"))
 		if minioErr != nil {
-			appLogger.Error("Failed to initialize Minio client or ensure bucket exists. Exiting.", "error", minioErr)
+			appLogger.Error("Failed to initialize Minio client. Exiting.", "error", minioErr)
 			os.Exit(1)
 		}
-		appLogger.Info("Minio client initialized and bucket ensured.", "bucket", cfg.MinioBucketName)
+		appLogger.Info("Minio client initialized.", "bucket", cfg.MinioBucketName)
 	} else {
-		appLogger.Error("Minio configuration is incomplete. Worker-Crawler cannot function without Minio. Exiting.", "error", "incomplete Minio config")
+		appLogger.Error("Minio configuration incomplete. Exiting.", "error", "incomplete Minio config")
 		os.Exit(1)
 	}
 
@@ -65,16 +64,13 @@ func main() {
 		appLogger.Error("Failed to initialize RabbitMQ client. Exiting.", "error", err)
 		os.Exit(1)
 	}
-	// Defer rmqClient.Close() будет в конце main, после wg.Wait()
 
 	crawlService := crawler.NewCrawlService(appLogger, rmqClient, minioClient)
 
 	shutdownSignal := make(chan os.Signal, 1)
 	signal.Notify(shutdownSignal, syscall.SIGINT, syscall.SIGTERM)
-
 	var wg sync.WaitGroup
 
-	// Функция для запуска и перезапуска консьюмера (такая же, как в Оркестраторе)
 	startSingleConsumer := func(
 		client *messaging.RabbitMQClient,
 		opts messaging.ConsumeOpts,
@@ -83,25 +79,21 @@ func main() {
 	) {
 		defer wg.Done()
 		logger := consumerLogger.With("queue", opts.QueueName, "consumer_tag", opts.ConsumerTag)
-
 		for {
 			logger.Info("Attempting to start consumer...")
 			consumeErr := client.Consume(opts, handler)
 			logger.Info("Consumer has stopped.", "error_if_any", consumeErr)
-
 			select {
 			case <-shutdownSignal:
 				logger.Info("Shutdown signal received. Exiting consumer loop.")
 				return
 			default:
 			}
-
 			if consumeErr != nil {
 				logger.Error("Consumer failed. Will attempt to restart after a delay.", "error", consumeErr)
 			} else {
 				logger.Info("Consumer exited gracefully or connection was closed externally. Checking for shutdown signal before potential restart.")
 			}
-
 			select {
 			case <-shutdownSignal:
 				logger.Info("Shutdown signal received during restart delay. Exiting consumer loop.")
@@ -112,7 +104,7 @@ func main() {
 		}
 	}
 
-	appLogger.Info("Starting Worker-Crawler consumer...")
+	appLogger.Info("Starting consumer...", "service", serviceName)
 	wg.Add(1)
 	go startSingleConsumer(
 		rmqClient,
@@ -120,21 +112,32 @@ func main() {
 			QueueName:    "tasks.crawl.in.queue",
 			ExchangeName: messaging.TasksExchange,
 			RoutingKey:   messaging.CrawlTaskRoutingKey,
-			ConsumerTag:  "crawler-consumer-1", // Можно сделать более уникальным при масштабировании
+			ConsumerTag:  serviceName + "-consumer-1",
 		},
 		crawlService.HandleTask,
 		appLogger,
 	)
 
-	appLogger.Info("Worker-Crawler service is now running. Press CTRL+C to exit.")
+	appLogger.Info("Service is now running. Press CTRL+C to exit.", "name", serviceName)
 	sig := <-shutdownSignal
-	appLogger.Info("Shutdown signal received, initiating graceful shutdown", "signal", sig.String())
+	appLogger.Info("Shutdown signal received, initiating graceful shutdown", "signal", sig.String(), "service", serviceName)
 
-	appLogger.Info("Closing RabbitMQ client connection to signal consumer to stop...")
+	appLogger.Info("Closing RabbitMQ client connection to signal consumer to stop...", "service", serviceName)
 	rmqClient.Close()
 
-	appLogger.Info("Waiting for consumer to finish...")
-	wg.Wait()
+	appLogger.Info("Waiting for consumer to finish (up to 5s)...", "service", serviceName)
+	waitGroupDone := make(chan struct{})
+	go func() {
+		defer close(waitGroupDone)
+		wg.Wait()
+	}()
 
-	appLogger.Info("Worker-Crawler service shut down gracefully.")
+	select {
+	case <-waitGroupDone:
+		appLogger.Info("Consumer finished gracefully.", "service", serviceName)
+	case <-time.After(5 * time.Second):
+		appLogger.Warn("Timeout waiting for consumer to finish. Proceeding with shutdown.", "service", serviceName)
+	}
+
+	appLogger.Info("Service shut down gracefully.", "name", serviceName)
 }

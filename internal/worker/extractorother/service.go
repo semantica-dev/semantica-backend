@@ -10,24 +10,24 @@ import (
 
 	"github.com/rabbitmq/amqp091-go"
 	"github.com/semantica-dev/semantica-backend/pkg/messaging"
-	"github.com/semantica-dev/semantica-backend/pkg/storage" // Убедимся, что импорт есть
+	"github.com/semantica-dev/semantica-backend/pkg/storage"
 )
 
 type ExtractorOtherService struct {
 	logger      *slog.Logger
 	publisher   *messaging.RabbitMQClient
-	minioClient *storage.MinioClient // <--- ДОБАВЛЕНО ПОЛЕ
+	minioClient *storage.MinioClient
 }
 
 func NewExtractorOtherService(
 	logger *slog.Logger,
 	publisher *messaging.RabbitMQClient,
-	minioClient *storage.MinioClient, // <--- ДОБАВЛЕН АРГУМЕНТ
+	minioClient *storage.MinioClient,
 ) *ExtractorOtherService {
 	return &ExtractorOtherService{
 		logger:      logger.With("component", "extractor_other_service"),
 		publisher:   publisher,
-		minioClient: minioClient, // <--- ПРИСВОЕНО ПОЛЕ
+		minioClient: minioClient,
 	}
 }
 
@@ -85,10 +85,11 @@ func (s *ExtractorOtherService) publishResultAndAck(result messaging.ExtractOthe
 			"message", result.Message)
 	}
 
+	s.logger.Debug("Attempting to acknowledge original message in ExtractorOtherService", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID)
 	if ackErr := delivery.Ack(false); ackErr != nil {
 		s.logger.Error("Failed to acknowledge original extract other task message", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID, "error", ackErr)
-		return fmt.Errorf("failed to Ack extract other message (tag %d): %w", delivery.DeliveryTag, ackErr)
+		return fmt.Errorf("failed to Ack extract other message (tag %d) in ExtractorOtherService: %w", delivery.DeliveryTag, ackErr)
 	}
-	s.logger.Debug("Original extract other task message acknowledged successfully", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID)
+	s.logger.Info("Successfully acknowledged original extract other task message", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID)
 	return nil
 }

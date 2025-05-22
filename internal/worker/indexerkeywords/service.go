@@ -10,27 +10,27 @@ import (
 
 	"github.com/rabbitmq/amqp091-go"
 	"github.com/semantica-dev/semantica-backend/pkg/messaging"
-	"github.com/semantica-dev/semantica-backend/pkg/storage" // Убедимся, что импорт есть
+	"github.com/semantica-dev/semantica-backend/pkg/storage"
 	// "database/sql" // Понадобится для PostgreSQL
 )
 
 type IndexerKeywordsService struct {
 	logger      *slog.Logger
 	publisher   *messaging.RabbitMQClient
-	minioClient *storage.MinioClient // <--- ДОБАВЛЕНО ПОЛЕ
+	minioClient *storage.MinioClient
 	// db *sql.DB // Для PostgreSQL
 }
 
 func NewIndexerKeywordsService(
 	logger *slog.Logger,
 	publisher *messaging.RabbitMQClient,
-	minioClient *storage.MinioClient, // <--- ДОБАВЛЕН АРГУМЕНТ
+	minioClient *storage.MinioClient,
 	// db *sql.DB, // Для PostgreSQL
 ) *IndexerKeywordsService {
 	return &IndexerKeywordsService{
 		logger:      logger.With("component", "indexer_keywords_service"),
 		publisher:   publisher,
-		minioClient: minioClient, // <--- ПРИСВОЕНО ПОЛЕ
+		minioClient: minioClient,
 		// db: db,
 	}
 }
@@ -52,7 +52,7 @@ func (s *IndexerKeywordsService) HandleTask(delivery amqp091.Delivery) error {
 		TaskID:            task.TaskID,
 		OriginalURL:       task.OriginalURL,
 		OriginalFilePath:  task.OriginalFilePath,
-		ProcessedDataPath: task.ProcessedDataPath, // Важно передать
+		ProcessedDataPath: task.ProcessedDataPath,
 		Success:           false,
 	}
 
@@ -65,7 +65,7 @@ func (s *IndexerKeywordsService) HandleTask(delivery amqp091.Delivery) error {
 	time.Sleep(1 * time.Second)
 	s.logger.Info("Keyword indexing simulation finished", "task_id", task.TaskID)
 
-	result.KeywordsStored = true // Симулируем
+	result.KeywordsStored = true
 	result.Success = true
 	result.Message = "Successfully indexed keywords (simulated)"
 
@@ -84,10 +84,11 @@ func (s *IndexerKeywordsService) publishResultAndAck(result messaging.IndexKeywo
 			"message", result.Message)
 	}
 
+	s.logger.Debug("Attempting to acknowledge original message in IndexerKeywordsService", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID)
 	if ackErr := delivery.Ack(false); ackErr != nil {
 		s.logger.Error("Failed to acknowledge original index keywords task message", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID, "error", ackErr)
-		return fmt.Errorf("failed to Ack index keywords message (tag %d): %w", delivery.DeliveryTag, ackErr)
+		return fmt.Errorf("failed to Ack index keywords message (tag %d) in IndexerKeywordsService: %w", delivery.DeliveryTag, ackErr)
 	}
-	s.logger.Debug("Original index keywords task message acknowledged successfully", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID)
+	s.logger.Info("Successfully acknowledged original index keywords task message", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID)
 	return nil
 }

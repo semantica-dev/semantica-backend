@@ -50,52 +50,52 @@ func main() {
 		}
 	} else {
 		appLogger.Warn("POSTGRES_DSN is not set. Orchestrator requires a database.")
-		// Не выходим, но функциональность будет ограничена
 	}
 
 	var minioClient *storage.MinioClient
 	var minioErr error
 	if cfg.MinioEndpoint != "" && cfg.MinioAccessKeyID != "" && cfg.MinioSecretAccessKey != "" && cfg.MinioBucketName != "" {
 		minioInternalCfg := storage.MinioConfig{
-			Endpoint:        cfg.MinioEndpoint,
-			AccessKeyID:     cfg.MinioAccessKeyID,
-			SecretAccessKey: cfg.MinioSecretAccessKey,
-			UseSSL:          cfg.MinioUseSSL,
-			BucketName:      cfg.MinioBucketName,
+			Endpoint: cfg.MinioEndpoint, AccessKeyID: cfg.MinioAccessKeyID,
+			SecretAccessKey: cfg.MinioSecretAccessKey, UseSSL: cfg.MinioUseSSL,
+			BucketName: cfg.MinioBucketName,
 		}
 		minioInitCtx, minioInitCancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer minioInitCancel()
+		defer minioInitCancel() // Отменяем контекст при выходе из main
 		minioClient, minioErr = storage.NewMinioClient(minioInitCtx, minioInternalCfg, appLogger.With("component", "minio_client_init"))
 		if minioErr != nil {
 			appLogger.Error("Failed to initialize Minio client or ensure bucket exists. Non-Minio features might still work.", "error", minioErr)
-			// Не выходим, но логируем
 		} else {
 			appLogger.Info("Minio client initialized and bucket ensured.", "bucket", cfg.MinioBucketName)
-			// --- TEMPORARY MINIO CLIENT TEST ---
+			// --- TEMPORARY MINIO CLIENT TEST (исправленный контекст) ---
 			appLogger.Info("[TEMP_TEST] Starting Minio client operational test...")
 			testObjectName := "test/orchestrator_startup_check.txt"
 			testContent := "Minio client test from Orchestrator: OK at " + time.Now().Format(time.RFC3339Nano)
 			testContentType := "text/plain"
-			testTimeout := 10 * time.Second
-			uploadCtx, uploadCancel := context.WithTimeout(context.Background(), testTimeout)
+			testTimeout := 10 * time.Second // Таймаут на каждую операцию
+
+			uploadCtx, uploadOpCancel := context.WithTimeout(context.Background(), testTimeout)
 			reader := strings.NewReader(testContent)
 			contentLength := int64(len(testContent))
 			_, errUpload := minioClient.UploadObject(uploadCtx, testObjectName, reader, contentLength, testContentType)
-			uploadCancel()
+			uploadOpCancel() // Отменяем контекст сразу после операции
+
 			if errUpload != nil {
 				appLogger.Error("[TEMP_TEST] Failed to upload test object", "object", testObjectName, "error", errUpload)
 			} else {
 				appLogger.Info("[TEMP_TEST] Test object uploaded successfully", "object", testObjectName)
 
-				readCtx, readCancel := context.WithTimeout(context.Background(), testTimeout) // Новый контекст для операции чтения
-				obj, errGet := minioClient.GetObject(readCtx, testObjectName)
+				getCtx, getOpCancel := context.WithTimeout(context.Background(), testTimeout)
+				obj, errGet := minioClient.GetObject(getCtx, testObjectName)
+				// Не делаем defer getOpCancel() здесь, если obj.Close() может быть позже
+
 				if errGet != nil {
-					readCancel() // Не забываем отменить, если GetObject вернул ошибку
+					getOpCancel() // Отменяем, если GetObject вернул ошибку
 					appLogger.Error("[TEMP_TEST] Failed to get test object", "object", testObjectName, "error", errGet)
 				} else {
 					retrievedBytes, errRead := io.ReadAll(obj)
-					obj.Close()  // Закрываем объект сразу после чтения (или ошибки чтения)
-					readCancel() // Отменяем контекст после всех операций с ним
+					obj.Close()   // Закрываем объект сразу
+					getOpCancel() // Отменяем контекст после всех операций с ним
 
 					if errRead != nil {
 						appLogger.Error("[TEMP_TEST] Failed to read test object content", "object", testObjectName, "error", errRead)
@@ -123,11 +123,10 @@ func main() {
 		appLogger.Error("Failed to initialize RabbitMQ client. Exiting.", "error", err)
 		os.Exit(1)
 	}
-	// Defer rmqClient.Close() будет в конце main, после wg.Wait()
 
 	taskPublisher := publisher.NewTaskPublisher(rmqClient, appLogger)
 	taskAPIHandler := api.NewTaskAPIHandler(appLogger, taskPublisher)
-	taskListener := listener.NewTaskListener(appLogger, taskPublisher) // taskPublisher (rmqClient) будет использоваться для отправки следующих задач
+	taskListener := listener.NewTaskListener(appLogger, taskPublisher)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/tasks/crawl", taskAPIHandler.CreateCrawlTaskHandler)
@@ -146,7 +145,6 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	// Функция для запуска и перезапуска одного консьюмера
 	startSingleConsumer := func(
 		client *messaging.RabbitMQClient,
 		opts messaging.ConsumeOpts,
@@ -155,32 +153,26 @@ func main() {
 	) {
 		defer wg.Done()
 		logger := consumerLogger.With("queue", opts.QueueName, "consumer_tag", opts.ConsumerTag)
-
 		for {
 			logger.Info("Attempting to start consumer...")
-			consumeErr := client.Consume(opts, handler) // Consume теперь сам получает новый канал
+			consumeErr := client.Consume(opts, handler)
 			logger.Info("Consumer has stopped.", "error_if_any", consumeErr)
-
 			select {
-			case <-shutdownSignal: // Проверяем, не пришел ли сигнал на выход, пока консьюмер работал или останавливался
+			case <-shutdownSignal:
 				logger.Info("Shutdown signal received. Exiting consumer loop.")
 				return
 			default:
-				// не сигнал завершения
 			}
-
 			if consumeErr != nil {
 				logger.Error("Consumer failed. Will attempt to restart after a delay.", "error", consumeErr)
 			} else {
-				logger.Info("Consumer exited gracefully (e.g. rmqClient.Close called). Checking for shutdown signal before potential restart.")
+				logger.Info("Consumer exited gracefully or connection was closed externally. Checking for shutdown signal before potential restart.")
 			}
-
-			// Пауза перед перезапуском, если не было сигнала на выход
 			select {
 			case <-shutdownSignal:
 				logger.Info("Shutdown signal received during restart delay. Exiting consumer loop.")
 				return
-			case <-time.After(cfg.RetryInterval): // Используем интервал из конфига
+			case <-time.After(cfg.RetryInterval):
 				logger.Info("Delay finished. Proceeding to restart consumer.")
 			}
 		}
@@ -201,7 +193,6 @@ func main() {
 	appLogger.Info("Starting Orchestrator consumers...", "count", len(consumersToStart))
 	for _, cons := range consumersToStart {
 		wg.Add(1)
-		// Передаем rmqClient, т.к. startSingleConsumer будет вызывать client.Consume()
 		go startSingleConsumer(rmqClient, cons.opts, cons.handler, appLogger)
 	}
 
@@ -211,33 +202,42 @@ func main() {
 		appLogger.Info("Orchestrator API server starting", "port", cfg.OrchestratorAPIPort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			appLogger.Error("Could not listen on HTTP port, signaling shutdown", "port", cfg.OrchestratorAPIPort, "error", err)
-			// Сигнализируем основному потоку о необходимости завершения, если сервер упал
 			select {
-			case shutdownSignal <- syscall.SIGABRT: // Используем другой сигнал для индикации ошибки сервера
-			default: // Если shutdownSignal уже занят, ничего не делаем
+			case shutdownSignal <- syscall.SIGABRT:
+			default:
 			}
 		}
 		appLogger.Info("Orchestrator API server stopped.")
 	}()
 
-	// Ожидаем сигнала на завершение или падения HTTP сервера
 	sig := <-shutdownSignal
 	appLogger.Info("Shutdown signal received, initiating graceful shutdown", "signal", sig.String())
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second) // Таймаут для остановки HTTP сервера
 	defer shutdownCancel()
 
 	appLogger.Info("Attempting to shut down HTTP server...")
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		appLogger.Warn("HTTP Server shutdown error (or already stopped)", "error", err)
 	}
-	<-httpServerDone // Ждем, пока горутина HTTP сервера точно завершится
+	<-httpServerDone
 
 	appLogger.Info("Closing RabbitMQ client connection to signal consumers to stop...")
-	rmqClient.Close() // Это закроет соединение, Consume должен завершиться
+	rmqClient.Close()
 
-	appLogger.Info("Waiting for all consumers to finish...")
-	wg.Wait() // Ожидаем завершения всех горутин startSingleConsumer
+	appLogger.Info("Waiting for all consumers to finish (up to 5s)...")
+	waitGroupDone := make(chan struct{})
+	go func() {
+		defer close(waitGroupDone)
+		wg.Wait()
+	}()
+
+	select {
+	case <-waitGroupDone:
+		appLogger.Info("All consumers finished gracefully.")
+	case <-time.After(5 * time.Second):
+		appLogger.Warn("Timeout waiting for consumers to finish. Proceeding with shutdown.")
+	}
 
 	appLogger.Info("Orchestrator service shut down gracefully.")
 }

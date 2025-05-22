@@ -10,27 +10,27 @@ import (
 
 	"github.com/rabbitmq/amqp091-go"
 	"github.com/semantica-dev/semantica-backend/pkg/messaging"
-	"github.com/semantica-dev/semantica-backend/pkg/storage" // Убедимся, что импорт есть
+	"github.com/semantica-dev/semantica-backend/pkg/storage"
 	// qdrantClient "github.com/qdrant/go-client/qdrant" // Понадобится для Qdrant
 )
 
 type IndexerEmbeddingsService struct {
 	logger      *slog.Logger
 	publisher   *messaging.RabbitMQClient
-	minioClient *storage.MinioClient // <--- ДОБАВЛЕНО ПОЛЕ
+	minioClient *storage.MinioClient
 	// qdrantClient *qdrant.PointsClient // Для Qdrant
 }
 
 func NewIndexerEmbeddingsService(
 	logger *slog.Logger,
 	publisher *messaging.RabbitMQClient,
-	minioClient *storage.MinioClient, // <--- ДОБАВЛЕН АРГУМЕНТ
+	minioClient *storage.MinioClient,
 	// qdrantClient *qdrant.PointsClient, // Для Qdrant
 ) *IndexerEmbeddingsService {
 	return &IndexerEmbeddingsService{
 		logger:      logger.With("component", "indexer_embeddings_service"),
 		publisher:   publisher,
-		minioClient: minioClient, // <--- ПРИСВОЕНО ПОЛЕ
+		minioClient: minioClient,
 		// qdrantClient: qdrantClient,
 	}
 }
@@ -52,7 +52,7 @@ func (s *IndexerEmbeddingsService) HandleTask(delivery amqp091.Delivery) error {
 		TaskID:            task.TaskID,
 		OriginalURL:       task.OriginalURL,
 		OriginalFilePath:  task.OriginalFilePath,
-		ProcessedDataPath: task.ProcessedDataPath, // Важно передать
+		ProcessedDataPath: task.ProcessedDataPath,
 		Success:           false,
 	}
 
@@ -65,7 +65,7 @@ func (s *IndexerEmbeddingsService) HandleTask(delivery amqp091.Delivery) error {
 	time.Sleep(3 * time.Second)
 	s.logger.Info("Embedding indexing simulation finished", "task_id", task.TaskID)
 
-	result.EmbeddingsStored = true // Симулируем
+	result.EmbeddingsStored = true
 	result.Success = true
 	result.Message = "Successfully indexed embeddings (simulated)"
 
@@ -73,7 +73,7 @@ func (s *IndexerEmbeddingsService) HandleTask(delivery amqp091.Delivery) error {
 	pubErr := s.publisher.Publish(context.Background(), messaging.TasksExchange, messaging.IndexEmbeddingsResultRoutingKey, result)
 	if pubErr != nil {
 		s.logger.Error("Failed to publish index embeddings result", "error", pubErr, "task_id", task.TaskID)
-		// Не прерываем, пытаемся отправить TaskProcessingFinishedEvent
+		// Не прерываем, пытаемся отправить TaskProcessingFinishedEvent и Ack'нуть
 	} else {
 		s.logger.Info("Index embeddings result published",
 			"task_id", result.TaskID,
@@ -98,10 +98,11 @@ func (s *IndexerEmbeddingsService) HandleTask(delivery amqp091.Delivery) error {
 	}
 
 	// Подтверждаем исходное сообщение IndexEmbeddingsTaskEvent
+	s.logger.Debug("Attempting to acknowledge original message in IndexerEmbeddingsService", "delivery_tag", delivery.DeliveryTag, "task_id", task.TaskID)
 	if ackErr := delivery.Ack(false); ackErr != nil {
 		s.logger.Error("Failed to acknowledge original index embeddings task message", "delivery_tag", delivery.DeliveryTag, "task_id", task.TaskID, "error", ackErr)
-		return fmt.Errorf("failed to Ack index embeddings message (tag %d): %w", delivery.DeliveryTag, ackErr)
+		return fmt.Errorf("failed to Ack index embeddings message (tag %d) in IndexerEmbeddingsService: %w", delivery.DeliveryTag, ackErr)
 	}
-	s.logger.Debug("Original index embeddings task message acknowledged successfully", "delivery_tag", delivery.DeliveryTag, "task_id", task.TaskID)
+	s.logger.Info("Successfully acknowledged original index embeddings task message", "delivery_tag", delivery.DeliveryTag, "task_id", task.TaskID)
 	return nil
 }
