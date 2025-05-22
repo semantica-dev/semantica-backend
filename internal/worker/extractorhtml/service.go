@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
-	// "mime" // Пока не используется здесь, но может понадобиться для чтения из Minio
 
 	"github.com/rabbitmq/amqp091-go"
 	"github.com/semantica-dev/semantica-backend/pkg/messaging"
@@ -51,9 +50,6 @@ func (s *ExtractorHTMLService) HandleTask(delivery amqp091.Delivery) error {
 		Success:     false,
 	}
 
-	// TODO: Реальная логика чтения из Minio по task.RawDataPath
-	// TODO: Реальная логика извлечения HTML и конвертации в Markdown
-
 	s.logger.Info("Simulating HTML extraction...",
 		"task_id", task.TaskID,
 		"input_raw_path", task.RawDataPath)
@@ -63,8 +59,6 @@ func (s *ExtractorHTMLService) HandleTask(delivery amqp091.Delivery) error {
 	s.logger.Info("HTML extraction simulation finished",
 		"task_id", task.TaskID,
 		"generated_markdown_path", simulatedMarkdownPath)
-
-	// TODO: Реальная загрузка обработанного Markdown/текста в Minio
 
 	result.MarkdownPath = simulatedMarkdownPath
 	result.Success = true
@@ -91,6 +85,5 @@ func (s *ExtractorHTMLService) publishResultAndAck(result messaging.ExtractHTMLR
 		s.logger.Error("Failed to acknowledge original extract HTML task message", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID, "error", ackErr)
 		return fmt.Errorf("failed to Ack extract HTML message (tag %d) in ExtractorHTMLService: %w", delivery.DeliveryTag, ackErr)
 	}
-	s.logger.Info("Successfully acknowledged original extract HTML task message", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID)
 	return nil
 }

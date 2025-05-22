@@ -50,9 +50,6 @@ func (s *ExtractorOtherService) HandleTask(delivery amqp091.Delivery) error {
 		Success:          false,
 	}
 
-	// TODO: Реальная логика чтения из Minio по task.RawDataPath
-	// TODO: Реальная логика извлечения текста из PDF, DOCX, TXT
-
 	s.logger.Info("Simulating other file extraction...",
 		"task_id", task.TaskID,
 		"input_raw_path", task.RawDataPath)
@@ -62,8 +59,6 @@ func (s *ExtractorOtherService) HandleTask(delivery amqp091.Delivery) error {
 	s.logger.Info("Other file extraction simulation finished",
 		"task_id", task.TaskID,
 		"generated_text_path", simulatedExtractedTextPath)
-
-	// TODO: Реальная загрузка извлеченного текста в Minio
 
 	result.ExtractedTextPath = simulatedExtractedTextPath
 	result.Success = true
@@ -90,6 +85,5 @@ func (s *ExtractorOtherService) publishResultAndAck(result messaging.ExtractOthe
 		s.logger.Error("Failed to acknowledge original extract other task message", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID, "error", ackErr)
 		return fmt.Errorf("failed to Ack extract other message (tag %d) in ExtractorOtherService: %w", delivery.DeliveryTag, ackErr)
 	}
-	s.logger.Info("Successfully acknowledged original extract other task message", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID)
 	return nil
 }

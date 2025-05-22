@@ -24,15 +24,12 @@ func NewTaskListener(logger *slog.Logger, pub *publisher.TaskPublisher) *TaskLis
 	}
 }
 
-// ackDelivery подтверждает доставку сообщения и логирует результат.
-// Возвращает ошибку, если подтверждение не удалось.
 func (l *TaskListener) ackDelivery(d amqp091.Delivery, taskID string, contextMsg string) error {
 	l.logger.Debug(fmt.Sprintf("Attempting to acknowledge message for %s", contextMsg), "delivery_tag", d.DeliveryTag, "task_id", taskID)
 	if err := d.Ack(false); err != nil {
 		l.logger.Error(fmt.Sprintf("Failed to acknowledge message for %s", contextMsg), "delivery_tag", d.DeliveryTag, "task_id", taskID, "error", err)
 		return fmt.Errorf("failed to Ack message (tag %d) for %s, task_id %s: %w", d.DeliveryTag, contextMsg, taskID, err)
 	}
-	l.logger.Info(fmt.Sprintf("Successfully acknowledged message for %s", contextMsg), "delivery_tag", d.DeliveryTag, "task_id", taskID)
 	return nil
 }
 
@@ -40,8 +37,6 @@ func (l *TaskListener) HandleCrawlResult(delivery amqp091.Delivery) error {
 	var crawlResult messaging.CrawlResultEvent
 	if err := json.Unmarshal(delivery.Body, &crawlResult); err != nil {
 		l.logger.Error("Failed to unmarshal crawl result event", "error", err, "body", string(delivery.Body))
-		// Сообщение не может быть обработано, возвращаем ошибку, чтобы rmqClient.Consume ее вернул
-		// Это приведет к перезапуску консьюмера. Сообщение останется в очереди или уйдет в DLX (если настроено).
 		return fmt.Errorf("unmarshal CrawlResultEvent: %w", err)
 	}
 	logCtx := l.logger.With("task_id", crawlResult.TaskID, "url", crawlResult.URL)
@@ -49,7 +44,6 @@ func (l *TaskListener) HandleCrawlResult(delivery amqp091.Delivery) error {
 
 	if !crawlResult.Success {
 		logCtx.Warn("Crawl task failed, not proceeding to extraction", "message", crawlResult.Message)
-		// TODO: Обновить статус задачи в БД как FAILED
 		return l.ackDelivery(delivery, crawlResult.TaskID, "failed crawl task")
 	}
 
@@ -63,12 +57,8 @@ func (l *TaskListener) HandleCrawlResult(delivery amqp091.Delivery) error {
 	err := l.publisher.Client().Publish(context.Background(), messaging.TasksExchange, messaging.ExtractHTMLTaskRoutingKey, extractHTMLTask)
 	if err != nil {
 		logCtx.Error("Failed to publish ExtractHTMLTaskEvent", "error", err)
-		// Публикация не удалась. Ack'аем исходное сообщение, чтобы оно не блокировало очередь. Задача "зависнет".
-		// TODO: Записать в БД о сбое этапа.
 		return l.ackDelivery(delivery, crawlResult.TaskID, "crawl task after failing to publish next step")
 	}
-
-	// TODO: Обновить статус задачи в БД (например, CRAWLED_SUCCESSFULLY, AWAITING_EXTRACTION)
 	return l.ackDelivery(delivery, crawlResult.TaskID, "successful crawl task processing")
 }
 
@@ -80,12 +70,10 @@ func (l *TaskListener) HandleExtractHTMLResult(delivery amqp091.Delivery) error 
 	}
 	logCtx := l.logger.With("task_id", extractResult.TaskID, "url", extractResult.OriginalURL)
 	logCtx.Info("Received extract HTML result", "success", extractResult.Success, "markdown_path", extractResult.MarkdownPath)
-
 	if !extractResult.Success {
 		logCtx.Warn("Extract HTML task failed, not proceeding", "message", extractResult.Message)
 		return l.ackDelivery(delivery, extractResult.TaskID, "failed extract HTML task")
 	}
-
 	indexKeywordsTask := messaging.IndexKeywordsTaskEvent{
 		TaskID:            extractResult.TaskID,
 		OriginalURL:       extractResult.OriginalURL,
@@ -172,7 +160,6 @@ func (l *TaskListener) HandleIndexEmbeddingsResult(delivery amqp091.Delivery) er
 	}
 
 	logCtx.Info("Main data processing pipeline appears finished for task (after embeddings)")
-	// Событие TaskProcessingFinishedEvent публикуется самим indexer-embeddings воркером.
 	return l.ackDelivery(delivery, embeddingsResult.TaskID, "successful index embeddings task processing")
 }
 
@@ -185,7 +172,6 @@ func (l *TaskListener) HandleTaskProcessingFinished(delivery amqp091.Delivery) e
 	logCtx := l.logger.With("task_id", finishedEvent.TaskID)
 	logCtx.Info("Received TaskProcessingFinishedEvent from a worker", "overall_success", finishedEvent.OverallSuccess, "final_message", finishedEvent.FinalMessage)
 
-	// TODO: Обновить статус задачи в БД на финальный (например, FINISHED_SUCCESS / FINISHED_FAILED).
 	logCtx.Info("Processing task marked as finished by worker event.")
 	return l.ackDelivery(delivery, finishedEvent.TaskID, "task processing finished event")
 }

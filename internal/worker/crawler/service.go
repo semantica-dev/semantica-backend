@@ -40,7 +40,6 @@ func (s *CrawlService) HandleTask(delivery amqp091.Delivery) error {
 	var task messaging.CrawlTaskEvent
 	if err := json.Unmarshal(delivery.Body, &task); err != nil {
 		s.logger.Error("Failed to unmarshal crawl task event", "error", err, "body", string(delivery.Body))
-		// Важно вернуть ошибку, чтобы сообщение не было Ack'нуто по умолчанию и могло быть Nack'нуто или переотправлено
 		return fmt.Errorf("unmarshal CrawlTaskEvent: %w", err)
 	}
 
@@ -119,11 +118,6 @@ func (s *CrawlService) publishResultAndAck(result messaging.CrawlResultEvent, de
 	pubErr := s.publisher.Publish(context.Background(), messaging.TasksExchange, messaging.CrawlResultRoutingKey, result)
 	if pubErr != nil {
 		s.logger.Error("Failed to publish crawl result", "error", pubErr, "task_id", result.TaskID)
-		// Если публикация не удалась, мы все равно должны попытаться Ack'нуть исходное сообщение,
-		// чтобы оно не обрабатывалось повторно, если проблема была временной.
-		// Однако, если сама публикация является критической частью, можно рассмотреть Nack.
-		// Для текущей логики, где Ack делается в любом случае (если не было ошибки до этого),
-		// продолжаем и пытаемся Ack'нуть.
 	} else {
 		s.logger.Info("Crawl result published", "task_id", result.TaskID, "success", result.Success, "raw_data_path", result.RawDataPath, "message", result.Message)
 	}
@@ -131,9 +125,7 @@ func (s *CrawlService) publishResultAndAck(result messaging.CrawlResultEvent, de
 	s.logger.Debug("Attempting to acknowledge original message in CrawlService", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID)
 	if ackErr := delivery.Ack(false); ackErr != nil {
 		s.logger.Error("Failed to acknowledge original message in CrawlService", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID, "error", ackErr)
-		// Возвращаем ошибку, чтобы rmqClient.Consume мог ее обработать
 		return fmt.Errorf("failed to Ack message (tag %d) in CrawlService: %w", delivery.DeliveryTag, ackErr)
 	}
-	s.logger.Info("Successfully acknowledged original message in CrawlService", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID)
 	return nil
 }

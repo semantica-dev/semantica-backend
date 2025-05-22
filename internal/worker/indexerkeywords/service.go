@@ -11,27 +11,23 @@ import (
 	"github.com/rabbitmq/amqp091-go"
 	"github.com/semantica-dev/semantica-backend/pkg/messaging"
 	"github.com/semantica-dev/semantica-backend/pkg/storage"
-	// "database/sql" // Понадобится для PostgreSQL
 )
 
 type IndexerKeywordsService struct {
 	logger      *slog.Logger
 	publisher   *messaging.RabbitMQClient
 	minioClient *storage.MinioClient
-	// db *sql.DB // Для PostgreSQL
 }
 
 func NewIndexerKeywordsService(
 	logger *slog.Logger,
 	publisher *messaging.RabbitMQClient,
 	minioClient *storage.MinioClient,
-	// db *sql.DB, // Для PostgreSQL
 ) *IndexerKeywordsService {
 	return &IndexerKeywordsService{
 		logger:      logger.With("component", "indexer_keywords_service"),
 		publisher:   publisher,
 		minioClient: minioClient,
-		// db: db,
 	}
 }
 
@@ -55,9 +51,6 @@ func (s *IndexerKeywordsService) HandleTask(delivery amqp091.Delivery) error {
 		ProcessedDataPath: task.ProcessedDataPath,
 		Success:           false,
 	}
-
-	// TODO: Реальная логика чтения обработанного текста/markdown из Minio по task.ProcessedDataPath
-	// TODO: Реальная логика извлечения ключевых слов и сохранения их в PostgreSQL
 
 	s.logger.Info("Simulating keyword indexing...",
 		"task_id", task.TaskID,
@@ -89,6 +82,5 @@ func (s *IndexerKeywordsService) publishResultAndAck(result messaging.IndexKeywo
 		s.logger.Error("Failed to acknowledge original index keywords task message", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID, "error", ackErr)
 		return fmt.Errorf("failed to Ack index keywords message (tag %d) in IndexerKeywordsService: %w", delivery.DeliveryTag, ackErr)
 	}
-	s.logger.Info("Successfully acknowledged original index keywords task message", "delivery_tag", delivery.DeliveryTag, "task_id", result.TaskID)
 	return nil
 }
