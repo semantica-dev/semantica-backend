@@ -1,0 +1,54 @@
+html {
+    height: 100%; 
+}
+
+body {
+    padding-top: 56px; 
+    display: flex;
+    flex-direction: column;
+    min-height: 100%; 
+    background-color: #f8f9fa;
+}
+
+main.container {
+    flex: 1 0 auto; 
+    padding-bottom: 80px; /* Увеличим, чтобы точно не перекрывалось футером */
+}
+
+.footer {
+    flex-shrink: 0; 
+    padding: 1rem 0;
+    background-color: #f8f9fa;
+    border-top: 1px solid #dee2e6;
+    text-align: center;
+}
+
+.table {
+    font-size: 0.9rem;
+    background-color: #ffffff;
+}
+
+.table th {
+    background-color: #e9ecef;
+}
+
+.status-badge {
+    min-width: 100px; 
+    display: inline-block;
+    text-align: center;
+    padding: 0.35em 0.65em;
+    font-size: .75em;
+    font-weight: 700;
+    line-height: 1;
+    color: #fff;
+    white-space: nowrap;
+    vertical-align: baseline;
+    border-radius: .25rem;
+}
+
+.jumbotron { 
+    padding: 2rem 1rem;
+    margin-bottom: 2rem;
+    background-color: #e9ecef;
+    border-radius: .3rem;
+}

@@ -1,0 +1,55 @@
+{% extends "search_ui/base.html" %}
+{% load static %} {# Хотя здесь не используется, но хорошая практика #}
+
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block content %}
+<div class="p-5 mb-4 bg-light rounded-3 shadow-sm">
+    <div class="container-fluid py-4">
+        <h1 class="display-5 fw-bold"><i class="bi bi-search-heart-fill me-2"></i>SemanticaПоиск</h1>
+        <p class="col-md-8 fs-5">Прототип распределенной системы семантического поиска информации.</p>
+        <hr class="my-4">
+        <p>Используйте навигационное меню для перехода к управлению задачами индексации или к поиску по
+            проиндексированным данным.</p>
+        {# Можно добавить карточки со "статистикой", как в примере, если у нас будет что отображать #}
+        {#
+        <div class="row g-3 text-center mt-4">
+            <div class="col-md-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body d-flex flex-column justify-content-between">
+                        <div>
+                            <h5 class="card-title"><i class="bi bi-card-list text-primary"></i> Задачи в обработке</h5>
+                            <p class="card-text fs-4 fw-bold">N/A</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body d-flex flex-column justify-content-between">
+                        <div>
+                            <h5 class="card-title"><i class="bi bi-file-earmark-check text-success"></i>
+                                Проиндексировано</h5>
+                            <p class="card-text fs-4 fw-bold">N/A</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body d-flex flex-column justify-content-between">
+                        <div>
+                            <h5 class="card-title"><i class="bi bi-server text-info"></i> Активные модули</h5>
+                            <p class="card-text fs-4 fw-bold">N/A</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        #}
+    </div>
+</div>
+
+{# Можно добавить секцию "Недавние задачи" или "Последние поисковые запросы", если будет такая логика #}
+
+{% endblock %}

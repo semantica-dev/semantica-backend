@@ -1,0 +1,60 @@
+{% extends "search_ui/base.html" %}
+{% load static %}
+
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2 class="mb-4">{{ page_title }}</h2>
+
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <form method="get" action="{% url 'search_ui:search_page' %}" class="mb-4">
+                {# {% csrf_token %} - не нужен для GET-форм #}
+                {{ search_form.query_text.label_tag }}
+                {{ search_form.query_text }}
+                {% for error in search_form.query_text.errors %}
+                    <div class="invalid-feedback d-block">{{ error }}</div>
+                {% endfor %}
+                <div class="d-grid gap-2 mt-2">
+                    <button type="submit" class="btn btn-primary btn-lg">Найти</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {% if performed_search %}
+        <hr class="my-4">
+        {% if search_results %}
+            <p class="text-muted">Найдено результатов: {{ total_found }} (запрошено {{ search_results|length }}). Время выполнения: {{ query_time_ms }} мс.</p>
+            <div class="list-group">
+                {% for item in search_results %}
+                    <div class="list-group-item list-group-item-action flex-column align-items-start mb-3 shadow-sm border">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h5 class="mb-1">
+                                {% if item.url %}
+                                    <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.title|default:"Без заголовка" }}</a>
+                                {% elif item.original_file_name %}
+                                    {{ item.title|default:item.original_file_name }} (Файл: {{ item.original_file_name }})
+                                {% else %}
+                                    {{ item.title|default:"Без заголовка" }}
+                                {% endif %}
+                            </h5>
+                            <small class="text-success">Релевантность: {{ item.relevance_score|floatformat:2 }}</small>
+                        </div>
+                        <p class="mb-1">
+                            {% autoescape off %}
+                                {{ item.snippet|default:"Нет описания."|truncatewords_html:50 }}
+                            {% endautoescape %}
+                        </p>
+                        <small class="text-muted">ID документа: {{ item.document_id }} | Тип: {{ item.source_type }}</small>
+                    </div>
+                {% endfor %}
+            </div>
+            {# Здесь можно будет добавить пагинацию, если total_found > search_results|length #}
+        {% elif not search_form.errors %} {# Если поиск был, но ничего не найдено и нет ошибок формы #}
+            {# Сообщение "ничего не найдено" теперь выводится через Django messages во view #}
+        {% endif %}
+    {% endif %}
+</div>
+{% endblock %}
