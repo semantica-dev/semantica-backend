@@ -4,57 +4,114 @@
 {% block title %}{{ page_title }}{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
-    <h2 class="mb-4">{{ page_title }}</h2>
+<div class="container mt-2"> {# Уменьшил верхний отступ #}
 
-    <div class="row justify-content-center">
-        <div class="col-md-8">
-            <form method="get" action="{% url 'search_ui:search_page' %}" class="mb-4">
-                {# {% csrf_token %} - не нужен для GET-форм #}
-                {{ search_form.query_text.label_tag }}
-                {{ search_form.query_text }}
-                {% for error in search_form.query_text.errors %}
-                    <div class="invalid-feedback d-block">{{ error }}</div>
-                {% endfor %}
-                <div class="d-grid gap-2 mt-2">
-                    <button type="submit" class="btn btn-primary btn-lg">Найти</button>
+    {# Блок для логотипа и строки поиска - центрируем его #}
+    <div class="row justify-content-center 
+        {% if search_results or performed_search and not search_results and not search_form.errors %}
+            search-block-with-results
+        {% else %}
+            search-block-initial
+        {% endif %}
+    ">
+        <div class="col-md-8 col-lg-7 text-center">
+
+            {# Логотип/Название системы #}
+            <div class="mb-4">
+                {# Вместо картинки можно использовать просто текст #}
+                {# <img src="{% static 'search_ui/img/semantica_logo.png' %}" alt="SemanticaПоиск Лого"
+                    style="max-height: 80px;"> #}
+                <h1 class="display-4 fw-bold text-primary"><i class="bi bi-search-heart-fill me-2"></i>SemanticaПоиск
+                </h1>
+                <p class="lead text-muted">Ваша персональная система семантического поиска</p>
+            </div>
+
+            {# Форма поиска #}
+            <form method="get" action="{% url 'search_ui:search_page' %}" class="mb-3">
+                <div class="input-group input-group-lg shadow-sm">
+                    {{ search_form.query_text }}
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search me-1"></i>Найти
+                    </button>
                 </div>
+                {% for error in search_form.query_text.errors %}
+                <div class="invalid-feedback d-block text-center mt-1">{{ error }}</div>
+                {% endfor %}
             </form>
         </div>
     </div>
 
+    {# Результаты поиска, если они есть или если был выполнен поиск #}
     {% if performed_search %}
-        <hr class="my-4">
-        {% if search_results %}
-            <p class="text-muted">Найдено результатов: {{ total_found }} (запрошено {{ search_results|length }}). Время выполнения: {{ query_time_ms }} мс.</p>
-            <div class="list-group">
-                {% for item in search_results %}
-                    <div class="list-group-item list-group-item-action flex-column align-items-start mb-3 shadow-sm border">
-                        <div class="d-flex w-100 justify-content-between">
-                            <h5 class="mb-1">
-                                {% if item.url %}
-                                    <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.title|default:"Без заголовка" }}</a>
-                                {% elif item.original_file_name %}
-                                    {{ item.title|default:item.original_file_name }} (Файл: {{ item.original_file_name }})
-                                {% else %}
-                                    {{ item.title|default:"Без заголовка" }}
-                                {% endif %}
-                            </h5>
-                            <small class="text-success">Релевантность: {{ item.relevance_score|floatformat:2 }}</small>
-                        </div>
-                        <p class="mb-1">
-                            {% autoescape off %}
-                                {{ item.snippet|default:"Нет описания."|truncatewords_html:50 }}
-                            {% endautoescape %}
-                        </p>
-                        <small class="text-muted">ID документа: {{ item.document_id }} | Тип: {{ item.source_type }}</small>
-                    </div>
-                {% endfor %}
+    <hr class="my-4 {% if not search_results and search_form.errors %}d-none{% endif %}">
+    {# Скрываем hr если только ошибки формы и нет результатов #}
+    <div class="row">
+        <div class="col-12">
+            {% if search_results %}
+            <p class="text-muted mb-3">
+                Найдено результатов: {{ total_found }}
+                {% if total_found != search_results|length %}(показано {{ search_results|length }}){% endif %}.
+                Время выполнения: {{ query_time_ms }} мс.
+            </p>
+
+            {% for item in search_results %}
+            <div class="card mb-3 shadow-sm search-result-item">
+                <div class="card-body">
+                    <h5 class="card-title mb-1">
+                        {% if item.url %}
+                        <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer"
+                            class="text-decoration-none">{{ item.title|default:"Без заголовка" }}</a>
+                        <small><i class="bi bi-link-45deg"></i></small>
+                        {% elif item.original_file_name %}
+                        <span class="fw-semibold">{{ item.title|default:item.original_file_name }}</span>
+                        <small class="text-muted ms-2">(Файл: {{ item.original_file_name }}) <i
+                                class="bi bi-file-earmark-text"></i></small>
+                        {% else %}
+                        <span class="fw-semibold">{{ item.title|default:"Без заголовка" }}</span>
+                        {% endif %}
+                    </h5>
+                    <p class="card-text small text-muted mb-2">
+                        <span class="badge bg-light text-dark me-2">Релевантность: {{ item.relevance_score|floatformat:2
+                            }}</span>
+                        <span class="text-capitalize">Тип: {{ item.source_type }}</span>
+                        | ID: {{ item.document_id|truncatechars:15 }}
+                    </p>
+                    <p class="card-text snippet mb-0">
+                        {% autoescape off %}
+                        {{ item.snippet|default:"Нет описания."|truncatewords_html:60 }}
+                        {% endautoescape %}
+                    </p>
+                </div>
             </div>
-            {# Здесь можно будет добавить пагинацию, если total_found > search_results|length #}
-        {% elif not search_form.errors %} {# Если поиск был, но ничего не найдено и нет ошибок формы #}
-            {# Сообщение "ничего не найдено" теперь выводится через Django messages во view #}
-        {% endif %}
+            {% endfor %}
+            {# Здесь можно будет добавить пагинацию #}
+
+            {% elif not search_form.errors %}
+            <div class="alert alert-info" role="alert">
+                По вашему запросу "{{ request.GET.query_text }}" ничего не найдено.
+            </div>
+            {% endif %}
+        </div>
+    </div>
     {% endif %}
 </div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .search-result-item .card-title a {
+        color: #0d6efd;
+    }
+
+    .search-result-item .card-title a:hover {
+        text-decoration: underline;
+    }
+
+    .snippet strong,
+    .snippet b {
+        background-color: #fff3cd;
+        padding: 0.1em 0.2em;
+        border-radius: 0.2em;
+    }
+</style>
 {% endblock %}

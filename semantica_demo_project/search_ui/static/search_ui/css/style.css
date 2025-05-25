@@ -52,3 +52,15 @@ main.container {
     background-color: #e9ecef;
     border-radius: .3rem;
 }
+
+.search-block-initial {
+    min-height: 60vh; /* Для начального состояния, когда нет результатов */
+    display: flex; /* Для align-items-center */
+    align-items: center; /* Для align-items-center */
+}
+
+.search-block-with-results {
+    min-height: auto; /* Или другое значение, если нужно */
+    margin-bottom: 2rem; /* Отступ, когда есть результаты */
+    padding-top: 2rem; /* Чтобы не прилипало к навбару, если min-height: auto */
+}
