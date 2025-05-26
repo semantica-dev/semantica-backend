@@ -81,7 +81,7 @@ def task_management_view(request):
                 tasks_with_status_display.append({
                     "task_id": task_id_in_session, "status": "не найдена",
                     "input_details": "N/A", "task_type": "N/A", "created_at": None, "updated_at": None, 
-                    "original_file_name": None, "error_message": "Задача не найдена в mock DB", "completed_at": None
+                    "original_file_name": None, "error_message": "Задача не найдена", "completed_at": None
                 })
     
     context = {

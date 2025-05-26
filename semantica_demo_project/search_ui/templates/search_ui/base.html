@@ -26,7 +26,6 @@
             <div class="collapse navbar-collapse" id="navbarCollapse">
                 <ul class="navbar-nav me-auto mb-2 mb-md-0">
                     <li class="nav-item">
-                        {# Теперь главная страница - это страница поиска #}
                         <a class="nav-link {% if request.resolver_match.url_name == 'search_page' %}active{% endif %}"
                             href="{% url 'search_ui:search_page' %}"><i class="bi bi-search me-1"></i>Поиск</a>
                     </li>

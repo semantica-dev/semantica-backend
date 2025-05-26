@@ -4,47 +4,45 @@
 {% block title %}{{ page_title }}{% endblock %}
 
 {% block content %}
-<div class="container mt-2"> {# Уменьшил верхний отступ #}
+<div class="container mt-2">
 
-    {# Блок для логотипа и строки поиска - центрируем его #}
-    <div class="row justify-content-center 
+    <div class="row justify-content-center align-items-center text-center search-block-container 
         {% if search_results or performed_search and not search_results and not search_form.errors %}
             search-block-with-results
         {% else %}
             search-block-initial
         {% endif %}
     ">
-        <div class="col-md-8 col-lg-7 text-center">
+        <div class="col-md-10 col-lg-8"> {# Увеличил ширину колонки для лучшего вида #}
 
-            {# Логотип/Название системы #}
-            <div class="mb-4">
-                {# Вместо картинки можно использовать просто текст #}
-                {# <img src="{% static 'search_ui/img/semantica_logo.png' %}" alt="SemanticaПоиск Лого"
-                    style="max-height: 80px;"> #}
-                <h1 class="display-4 fw-bold text-primary"><i class="bi bi-search-heart-fill me-2"></i>SemanticaПоиск
+            <div class="mb-4" id="brand-logo">
+                <h1 class="display-3 fw-bold text-primary mb-1">
+                    <i class="bi bi-search-heart-fill me-2"></i>SemanticaПоиск
                 </h1>
                 <p class="lead text-muted">Ваша персональная система семантического поиска</p>
             </div>
 
-            {# Форма поиска #}
             <form method="get" action="{% url 'search_ui:search_page' %}" class="mb-3">
                 <div class="input-group input-group-lg shadow-sm">
-                    {{ search_form.query_text }}
-                    <button type="submit" class="btn btn-primary">
+                    <input type="text" name="{{ search_form.query_text.name }}" class="form-control"
+                        placeholder="{{ search_form.query_text.field.widget.attrs.placeholder }}"
+                        id="{{ search_form.query_text.id_for_label }}" {% if search_form.query_text.value %}
+                        value="{{ search_form.query_text.value }}" {% endif %}>
+                    <button type="submit" class="btn btn-primary px-4">
                         <i class="bi bi-search me-1"></i>Найти
                     </button>
                 </div>
                 {% for error in search_form.query_text.errors %}
                 <div class="invalid-feedback d-block text-center mt-1">{{ error }}</div>
                 {% endfor %}
+                <label for="{{ search_form.query_text.id_for_label }}" class="visually-hidden">{{
+                    search_form.query_text.label }}</label>
             </form>
         </div>
     </div>
 
-    {# Результаты поиска, если они есть или если был выполнен поиск #}
     {% if performed_search %}
     <hr class="my-4 {% if not search_results and search_form.errors %}d-none{% endif %}">
-    {# Скрываем hr если только ошибки формы и нет результатов #}
     <div class="row">
         <div class="col-12">
             {% if search_results %}
@@ -84,10 +82,9 @@
                 </div>
             </div>
             {% endfor %}
-            {# Здесь можно будет добавить пагинацию #}
 
             {% elif not search_form.errors %}
-            <div class="alert alert-info" role="alert">
+            <div class="alert alert-info mt-4" role="alert">
                 По вашему запросу "{{ request.GET.query_text }}" ничего не найдено.
             </div>
             {% endif %}
@@ -99,6 +96,32 @@
 
 {% block extra_css %}
 <style>
+    .search-block-container {
+        /* Новый класс для общего контейнера поиска */
+        transition: all 0.3s ease-in-out;
+        /* Плавный переход для min-height */
+    }
+
+    .search-block-initial {
+        min-height: calc(80vh - 56px);
+        /* 80% высоты видимой области минус высота навбара */
+        display: flex;
+        align-items: center;
+    }
+
+    .search-block-with-results {
+        min-height: auto;
+        margin-bottom: 2rem;
+        padding-top: 1rem;
+        /* Уменьшил отступ сверху, когда есть результаты */
+    }
+
+    #brand-logo .display-3 {
+        /* Увеличил логотип */
+        font-size: 3.5rem;
+        /* Или другой размер */
+    }
+
     .search-result-item .card-title a {
         color: #0d6efd;
     }

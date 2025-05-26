@@ -9,48 +9,62 @@
 
     <div class="row">
         <!-- Форма для индексации URL -->
-        <div class="col-md-6 mb-4">
-            <div class="card shadow-sm">
+        <div class="col-md-6 mb-4 d-flex">
+            <div class="card shadow-sm h-100">
                 <div class="card-header">
                     <h5 class="mb-0">Добавить URL на индексацию</h5>
                 </div>
-                <div class="card-body">
-                    <form method="post" novalidate>
+                <div class="card-body d-flex flex-column">
+                    <form method="post" novalidate class="flex-grow-1">
                         {% csrf_token %}
-                        {{ url_form.as_p }}
-                        <button type="submit" name="submit_url_task" class="btn btn-primary">Отправить URL</button>
+                        {# Ручной рендеринг для url_form для полного контроля отступов #}
+                        {% for field in url_form %}
+                        <div class="mb-3">
+                            <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                            {{ field }} {# Предполагается, что виджет поля уже имеет класс form-control из forms.py #}
+                            {% if field.help_text %}
+                            <small class="form-text text-muted">{{ field.help_text }}</small>
+                            {% endif %}
+                            {% for error in field.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        {% endfor %}
+                        <div class="mt-auto">
+                            <button type="submit" name="submit_url_task" class="btn btn-primary">Отправить URL</button>
+                        </div>
                     </form>
                 </div>
             </div>
         </div>
 
-        <!-- Форма для индексации файла (демо) -->
-        <div class="col-md-6 mb-4">
-            <div class="card shadow-sm">
+        <!-- Форма для индексации файла -->
+        <div class="col-md-6 mb-4 d-flex">
+            <div class="card shadow-sm h-100">
                 <div class="card-header">
                     <h5 class="mb-0">Добавить файл на индексацию</h5>
                 </div>
-                <div class="card-body">
-                    <form method="post" enctype="multipart/form-data" novalidate>
+                <div class="card-body d-flex flex-column">
+                    <form method="post" enctype="multipart/form-data" novalidate class="flex-grow-1">
                         {% csrf_token %}
-                        {# Отображаем только поле для выбора файла из формы #}
+                        {# Ручной рендеринг для file_form для единообразия #}
+                        {% for field in file_form %}
                         <div class="mb-3">
-                            <label for="{{ file_form.uploaded_file.id_for_label }}" class="form-label">{{
-                                file_form.uploaded_file.label }}</label>
-                            {{ file_form.uploaded_file }}
-                            {% if file_form.uploaded_file.help_text %}
-                            <small class="form-text text-muted">{{ file_form.uploaded_file.help_text }}</small>
+                            <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                            {{ field }} {# Предполагается, что виджет поля уже имеет класс form-control из forms.py #}
+                            {% if field.help_text %}
+                            <small class="form-text text-muted">{{ field.help_text }}</small>
                             {% endif %}
-                            {% for error in file_form.uploaded_file.errors %}
+                            {% for error in field.errors %}
                             <div class="invalid-feedback d-block">{{ error }}</div>
                             {% endfor %}
                         </div>
-                        <button type="submit" name="submit_file_task" class="btn btn-success">Отправить файл</button>
+                        {% endfor %}
+                        <div class="mt-auto">
+                            <button type="submit" name="submit_file_task" class="btn btn-success">Отправить
+                                файл</button>
+                        </div>
                     </form>
-                    <small class="form-text text-muted mt-2">
-                        Выберите файл. Реальная загрузка и сохранение файла на данном этапе не происходит, но имя файла
-                        будет использовано для имитации создания задачи.
-                    </small>
                 </div>
             </div>
         </div>
@@ -68,10 +82,7 @@
                     <th>Тип</th>
                     <th>Входные данные</th>
                     <th>Статус</th>
-                    <th>Создана</th>
-                    <th>Обновлена</th>
-                    <th>Завершена</th>
-                    <th>Ошибка</th>
+                    <th>Детали ошибки</th>
                 </tr>
             </thead>
             <tbody>
@@ -81,11 +92,7 @@
                     <td>{{ task.task_type|default_if_none:"N/A" }}</td>
                     <td style="word-break: break-all;">
                         <small>{{ task.input_details|truncatechars:50|default_if_none:"N/A" }}</small>
-                        {# Пытаемся получить original_file_name из input_details, если это файловая задача #}
-                        {# или если он есть как отдельное поле в ответе API #}
-                        {% if task.task_type == "upload_file" and task.original_file_name %}
-                        <br><small class="text-muted">({{ task.original_file_name|truncatechars:30 }})</small>
-                        {% elif task.original_file_name %}
+                        {% if task.original_file_name %}
                         <br><small class="text-muted">({{ task.original_file_name|truncatechars:30 }})</small>
                         {% endif %}
                     </td>
@@ -98,16 +105,10 @@
                             {% else %}bg-secondary{% endif %}">
                             {{ task.status|default_if_none:"N/A" }}
                         </span>
+                        {% if task.completed_at %}
+                        <br><small class="text-muted">Завершена: {{ task.completed_at|date:"d.m.Y H:i" }}</small>
+                        {% endif %}
                     </td>
-                    <td><small>{{ task.created_at|date:"Y-m-d H:i:s"|default_if_none:"N/A" }}</small></td>
-                    <td><small>{{ task.updated_at|date:"Y-m-d H:i:s"|default_if_none:"N/A" }}</small></td>
-                    <td><small>
-                            {% if task.completed_at %}
-                            {{ task.completed_at|date:"Y-m-d H:i:s" }}
-                            {% else %}
-                            -
-                            {% endif %}
-                        </small></td>
                     <td class="text-danger"><small>{{ task.error_message|default_if_none:"" }}</small></td>
                 </tr>
                 {% endfor %}

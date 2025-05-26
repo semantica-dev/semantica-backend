@@ -18,7 +18,7 @@ status_cycle = [
     "processing_indexing_embeddings",
     "completed_successfully"
 ]
-status_error_message = "An unexpected error occurred during processing."
+status_error_message = "В процессе обработки произошла непредвиденная ошибка."
 
 # Модели для результатов поиска (можно оставить Pydantic для удобства)
 # Используем суффикс Logic, чтобы избежать конфликта имен с Django моделями или формами, если они появятся
