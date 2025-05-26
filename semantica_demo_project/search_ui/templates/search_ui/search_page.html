@@ -13,7 +13,7 @@
             search-block-initial
         {% endif %}
     ">
-        <div class="col-md-10 col-lg-8"> {# Увеличил ширину колонки для лучшего вида #}
+        <div class="col-md-10 col-lg-8">
 
             <div class="mb-4" id="brand-logo">
                 <h1 class="display-3 fw-bold text-primary mb-1">
@@ -27,7 +27,7 @@
                     <input type="text" name="{{ search_form.query_text.name }}" class="form-control"
                         placeholder="{{ search_form.query_text.field.widget.attrs.placeholder }}"
                         id="{{ search_form.query_text.id_for_label }}" {% if search_form.query_text.value %}
-                        value="{{ search_form.query_text.value }}" {% endif %}>
+                        value="{{ search_form.query_text.value|escape }}" {% endif %}>
                     <button type="submit" class="btn btn-primary px-4">
                         <i class="bi bi-search me-1"></i>Найти
                     </button>
@@ -69,8 +69,9 @@
                         {% endif %}
                     </h5>
                     <p class="card-text small text-muted mb-2">
-                        <span class="badge bg-light text-dark me-2">Релевантность: {{ item.relevance_score|floatformat:2
-                            }}</span>
+                        {% with score_str=item.relevance_score|floatformat:2 %}
+                        <span class="badge bg-light text-dark me-2">Релевантность: {{ score_str }}</span>
+                        {% endwith %}
                         <span class="text-capitalize">Тип: {{ item.source_type }}</span>
                         | ID: {{ item.document_id|truncatechars:15 }}
                     </p>
@@ -97,14 +98,11 @@
 {% block extra_css %}
 <style>
     .search-block-container {
-        /* Новый класс для общего контейнера поиска */
         transition: all 0.3s ease-in-out;
-        /* Плавный переход для min-height */
     }
 
     .search-block-initial {
         min-height: calc(80vh - 56px);
-        /* 80% высоты видимой области минус высота навбара */
         display: flex;
         align-items: center;
     }
@@ -113,13 +111,10 @@
         min-height: auto;
         margin-bottom: 2rem;
         padding-top: 1rem;
-        /* Уменьшил отступ сверху, когда есть результаты */
     }
 
     #brand-logo .display-3 {
-        /* Увеличил логотип */
         font-size: 3.5rem;
-        /* Или другой размер */
     }
 
     .search-result-item .card-title a {
