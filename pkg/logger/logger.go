@@ -36,24 +36,28 @@ type PrettyHandler struct {
 	mu             *sync.Mutex
 	writer         io.Writer
 	colorize       bool
+	expanded       bool
 	attrBuffer     *bytes.Buffer
 }
 
 // NewPrettyHandler creates a new PrettyHandler.
-func NewPrettyHandler(writer io.Writer, opts slog.HandlerOptions, colorizeOutput bool) *PrettyHandler {
+// 'expanded' controls whether JSON attributes are indented (pretty-expanded) or compact (pretty).
+func NewPrettyHandler(writer io.Writer, opts slog.HandlerOptions, colorizeOutput, expanded bool) *PrettyHandler {
 	buffer := &bytes.Buffer{}
-	innerHandlerOpts := &slog.HandlerOptions{
+	innerOpts := &slog.HandlerOptions{
 		Level:       opts.Level,
 		AddSource:   opts.AddSource,
 		ReplaceAttr: opts.ReplaceAttr,
 	}
-
+	// JSON handler writes into buffer; indentation is applied manually.
+	jsonH := slog.NewJSONHandler(buffer, innerOpts)
 	return &PrettyHandler{
 		handlerOptions: opts,
-		jsonHandler:    slog.NewJSONHandler(buffer, innerHandlerOpts),
+		jsonHandler:    jsonH,
 		mu:             &sync.Mutex{},
 		writer:         writer,
 		colorize:       colorizeOutput,
+		expanded:       expanded,
 		attrBuffer:     buffer,
 	}
 }
@@ -69,6 +73,7 @@ func (h *PrettyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		mu:             h.mu,
 		writer:         h.writer,
 		colorize:       h.colorize,
+		expanded:       h.expanded,
 		attrBuffer:     h.attrBuffer,
 	}
 }
@@ -80,6 +85,7 @@ func (h *PrettyHandler) WithGroup(name string) slog.Handler {
 		mu:             h.mu,
 		writer:         h.writer,
 		colorize:       h.colorize,
+		expanded:       h.expanded,
 		attrBuffer:     h.attrBuffer,
 	}
 }
@@ -100,17 +106,18 @@ func (h *PrettyHandler) Handle(ctx context.Context, r slog.Record) error {
 		return err
 	}
 
-	maybeColorize := func(colorCode string, text string) string {
+	maybeColorize := func(colorCode, text string) string {
 		if h.colorize {
 			return colorCode + text + ColorReset
 		}
 		return text
 	}
 
-	// Используем новый, более подробный формат времени
+	// Format time
 	timeStr := r.Time.Format("2006-01-02 15:04:05.000")
 	delete(allAttrs, slog.TimeKey)
 
+	// Level
 	levelStr := r.Level.String()
 	delete(allAttrs, slog.LevelKey)
 	switch r.Level {
@@ -125,12 +132,13 @@ func (h *PrettyHandler) Handle(ctx context.Context, r slog.Record) error {
 	default:
 		levelStr = maybeColorize(ColorMagenta, levelStr)
 	}
-	// Убираем выравнивание для уровня лога
 
+	// Message
 	msgStr := r.Message
 	delete(allAttrs, slog.MessageKey)
 	msgStr = maybeColorize(ColorBrightWhite, msgStr)
 
+	// Source
 	sourceStr := ""
 	if h.handlerOptions.AddSource {
 		if srcVal, ok := allAttrs[slog.SourceKey]; ok {
@@ -138,7 +146,6 @@ func (h *PrettyHandler) Handle(ctx context.Context, r slog.Record) error {
 				file, _ := srcMap["file"].(string)
 				lineFloat, _ := srcMap["line"].(float64)
 				if file != "" {
-					// Используем полный путь к файлу
 					sourceStr = fmt.Sprintf("%s:%d", file, int(lineFloat))
 					sourceStr = maybeColorize(ColorGray, sourceStr)
 				}
@@ -148,13 +155,13 @@ func (h *PrettyHandler) Handle(ctx context.Context, r slog.Record) error {
 			fs := runtime.CallersFrames([]uintptr{r.PC})
 			f, _ := fs.Next()
 			if f.File != "" {
-				// Используем полный путь к файлу
 				sourceStr = fmt.Sprintf("%s:%d", f.File, f.Line)
 				sourceStr = maybeColorize(ColorGray, sourceStr)
 			}
 		}
 	}
 
+	// Build output
 	var sb strings.Builder
 	sb.WriteString(maybeColorize(ColorBrightBlack, "["+timeStr+"]"))
 	sb.WriteString(" ")
@@ -168,7 +175,14 @@ func (h *PrettyHandler) Handle(ctx context.Context, r slog.Record) error {
 
 	if len(allAttrs) > 0 {
 		sb.WriteString(" ")
-		attrsBytes, err := json.MarshalIndent(allAttrs, "", "  ")
+		// Choose compact or expanded JSON
+		var attrsBytes []byte
+		var err error
+		if h.expanded {
+			attrsBytes, err = json.MarshalIndent(allAttrs, "", "  ")
+		} else {
+			attrsBytes, err = json.Marshal(allAttrs)
+		}
 		if err != nil {
 			sb.WriteString(maybeColorize(ColorRed, fmt.Sprintf("<error marshaling attrs: %v>", err)))
 		} else {
@@ -182,23 +196,26 @@ func (h *PrettyHandler) Handle(ctx context.Context, r slog.Record) error {
 }
 
 // New creates a new slog.Logger based on the specified format and level.
-func New(serviceName string, logFormat string, logLevel slog.Level) *slog.Logger {
-	var handler slog.Handler
-
+func New(serviceName, logFormat string, logLevel slog.Level) *slog.Logger {
 	handlerOpts := slog.HandlerOptions{
 		AddSource: true,
 		Level:     logLevel,
 	}
-
 	commonAttrs := []slog.Attr{slog.String("service", serviceName)}
 
+	var handler slog.Handler
 	switch strings.ToLower(logFormat) {
+	case "pretty-expanded":
+		// expanded JSON attributes (multiline)
+		h := NewPrettyHandler(os.Stdout, handlerOpts, true, true)
+		handler = h.WithAttrs(commonAttrs)
 	case "pretty":
-		pretty := NewPrettyHandler(os.Stdout, handlerOpts, true)
-		handler = pretty.WithAttrs(commonAttrs)
+		// compact JSON attributes (single line)
+		h := NewPrettyHandler(os.Stdout, handlerOpts, true, false)
+		handler = h.WithAttrs(commonAttrs)
 	default:
-		jsonHandler := slog.NewJSONHandler(os.Stdout, &handlerOpts)
-		handler = jsonHandler.WithAttrs(commonAttrs)
+		jsonH := slog.NewJSONHandler(os.Stdout, &handlerOpts)
+		handler = jsonH.WithAttrs(commonAttrs)
 	}
 
 	return slog.New(handler)
