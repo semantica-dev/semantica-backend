@@ -42,7 +42,7 @@ def task_management_view(request):
                     response_data = mock_api_logic.logic_create_file_task(mock_minio_path, original_name)
                     task_id_from_form = response_data.get("task_id")
                     if task_id_from_form:
-                        messages.success(request, f"Задача на индексацию файла '{original_name}' успешно создана (ID: {task_id_from_form}). Имитация пути в MinIO: {mock_minio_path}")
+                        messages.success(request, f"Задача на индексацию файла '{original_name}' успешно создана (ID: {task_id_from_form}). Путь в MinIO: {mock_minio_path}")
                         task_action_successful = True
                 except Exception as e:
                     messages.error(request, f"Ошибка при создании задачи для файла: {e}")

@@ -9,114 +9,116 @@
 
     <div class="row">
         <!-- Форма для индексации URL -->
-        <div class="col-md-6 mb-4 d-flex flex-fill"> {# <--- ДОБАВЛЕНО flex-fill #} <div
-                class="card shadow-sm h-100 w-100"> {# <--- ДОБАВЛЕНО w-100 #} <div class="card-header">
+        <div class="col-md-6 mb-4 d-flex flex-fill">
+            <div class="card shadow-sm h-100 w-100">
+                <div class="card-header">
                     <h5 class="mb-0">Добавить URL на индексацию</h5>
+                </div>
+                <div class="card-body d-flex flex-column">
+                    <form method="post" novalidate class="flex-grow-1 d-flex flex-column">
+                        <div class="flex-grow-1">
+                            {% csrf_token %}
+                            {% for field in url_form %}
+                            <div class="mb-3">
+                                <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                                {{ field }}
+                                {% if field.help_text %}
+                                <small class="form-text text-muted">{{ field.help_text }}</small>
+                                {% endif %}
+                                {% for error in field.errors %}
+                                <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <div class="mt-auto">
+                            <button type="submit" name="submit_url_task" class="btn btn-primary w-100">Отправить
+                                URL</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
         </div>
-        <div class="card-body d-flex flex-column">
-            <form method="post" novalidate class="flex-grow-1 d-flex flex-column">
-                <div class="flex-grow-1">
-                    {% csrf_token %}
-                    {% for field in url_form %}
-                    <div class="mb-3">
-                        <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
-                        {{ field }}
-                        {% if field.help_text %}
-                        <small class="form-text text-muted">{{ field.help_text }}</small>
-                        {% endif %}
-                        {% for error in field.errors %}
-                        <div class="invalid-feedback d-block">{{ error }}</div>
-                        {% endfor %}
-                    </div>
-                    {% endfor %}
+
+        <!-- Форма для индексации файла -->
+        <div class="col-md-6 mb-4 d-flex flex-fill">
+            <div class="card shadow-sm h-100 w-100">
+                <div class="card-header">
+                    <h5 class="mb-0">Добавить файл на индексацию</h5>
                 </div>
-                <div class="mt-auto">
-                    <button type="submit" name="submit_url_task" class="btn btn-primary w-100">Отправить URL</button>
+                <div class="card-body d-flex flex-column">
+                    <form method="post" enctype="multipart/form-data" novalidate class="flex-grow-1 d-flex flex-column">
+                        <div class="flex-grow-1">
+                            {% csrf_token %}
+                            <div class="mb-3">
+                                <label for="{{ file_form.uploaded_file.id_for_label }}" class="form-label">Выберите файл
+                                    для индексации</label>
+                                {{ file_form.uploaded_file }}
+                                {% if file_form.uploaded_file.help_text %}
+                                <small class="form-text text-muted">{{ file_form.uploaded_file.help_text }}</small>
+                                {% endif %}
+                                {% for error in file_form.uploaded_file.errors %}
+                                <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <div class="mt-auto">
+                            <button type="submit" name="submit_file_task" class="btn btn-success w-100">Отправить
+                                файл</button>
+                        </div>
+                    </form>
                 </div>
-            </form>
+            </div>
         </div>
     </div>
-</div>
 
-<!-- Форма для индексации файла -->
-<div class="col-md-6 mb-4 d-flex flex-fill"> {# <--- ДОБАВЛЕНО flex-fill #} <div class="card shadow-sm h-100 w-100">
-        <div class="card-header">
-            <h5 class="mb-0">Добавить файл на индексацию</h5>
-        </div>
-        <div class="card-body d-flex flex-column">
-            <form method="post" enctype="multipart/form-data" novalidate class="flex-grow-1 d-flex flex-column">
-                <div class="flex-grow-1">
-                    {% csrf_token %}
-                    <div class="mb-3">
-                        <label for="{{ file_form.uploaded_file.id_for_label }}" class="form-label">{{
-                            file_form.uploaded_file.label }}</label>
-                        {{ file_form.uploaded_file }}
-                        {% if file_form.uploaded_file.help_text %}
-                        <small class="form-text text-muted">{{ file_form.uploaded_file.help_text }}</small>
+    <hr class="my-4">
+
+    <h3 class="mb-3">Список задач</h3>
+    {% if tasks %}
+    <div class="table-responsive">
+        <table class="table table-striped table-hover align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>ID Задачи</th>
+                    <th>Тип</th>
+                    <th>Входные данные</th>
+                    <th>Статус</th>
+                    <th>Детали ошибки</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for task in tasks %}
+                <tr>
+                    <td><small>{{ task.task_id }}</small></td>
+                    <td>{{ task.task_type|default_if_none:"N/A" }}</td>
+                    <td style="word-break: break-all;">
+                        <small>{{ task.input_details|truncatechars:50|default_if_none:"N/A" }}</small>
+                        {% if task.original_file_name %}
+                        <br><small class="text-muted">({{ task.original_file_name|truncatechars:30 }})</small>
                         {% endif %}
-                        {% for error in file_form.uploaded_file.errors %}
-                        <div class="invalid-feedback d-block">{{ error }}</div>
-                        {% endfor %}
-                    </div>
-                </div>
-                <div class="mt-auto">
-                    <button type="submit" name="submit_file_task" class="btn btn-success w-100">Отправить файл</button>
-                </div>
-            </form>
-        </div>
-</div>
-</div>
-</div>
-
-<hr class="my-4">
-
-<h3 class="mb-3">Список задач</h3>
-{% if tasks %}
-<div class="table-responsive">
-    <table class="table table-striped table-hover align-middle">
-        <thead class="table-light">
-            <tr>
-                <th>ID Задачи</th>
-                <th>Тип</th>
-                <th>Входные данные</th>
-                <th>Статус</th>
-                <th>Детали ошибки</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for task in tasks %}
-            <tr>
-                <td><small>{{ task.task_id }}</small></td>
-                <td>{{ task.task_type|default_if_none:"N/A" }}</td>
-                <td style="word-break: break-all;">
-                    <small>{{ task.input_details|truncatechars:50|default_if_none:"N/A" }}</small>
-                    {% if task.original_file_name %}
-                    <br><small class="text-muted">({{ task.original_file_name|truncatechars:30 }})</small>
-                    {% endif %}
-                </td>
-                <td>
-                    <span class="badge status-badge 
+                    </td>
+                    <td>
+                        <span class="badge status-badge 
                             {% if task.status == 'completed_successfully' %}bg-success
                             {% elif task.status == 'failed' %}bg-danger
                             {% elif 'processing' in task.status %}bg-info text-dark
                             {% elif task.status == 'pending' %}bg-primary
                             {% else %}bg-secondary{% endif %}">
-                        {{ task.status|default_if_none:"N/A" }}
-                    </span>
-                    {% if task.completed_at %}
-                    <br><small class="text-muted">Завершена: {{ task.completed_at|date:"d.m.Y H:i" }}</small>
-                    {% endif %}
-                </td>
-                <td class="text-danger"><small>{{ task.error_message|default_if_none:"" }}</small></td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% else %}
-<div class="alert alert-info" role="alert">
-    Пока нет созданных задач.
-</div>
-{% endif %}
+                            {{ task.status|default_if_none:"N/A" }}
+                        </span>
+
+                    </td>
+                    <td class="text-danger"><small>{{ task.error_message|default_if_none:"" }}</small></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="alert alert-info" role="alert">
+        Пока нет созданных задач.
+    </div>
+    {% endif %}
 </div>
 {% endblock %}

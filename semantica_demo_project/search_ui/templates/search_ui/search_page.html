@@ -17,7 +17,7 @@
 
             <div class="mb-4" id="brand-logo">
                 <h1 class="display-3 fw-bold text-primary mb-1">
-                    <i class="bi bi-search-heart-fill me-2"></i>SemanticaПоиск
+                    <i class="bi bi-search-heart-fill me-2"></i>Semantica
                 </h1>
                 <p class="lead text-muted">Ваша персональная система семантического поиска</p>
             </div>
@@ -69,8 +69,22 @@
                         {% endif %}
                     </h5>
                     <p class="card-text small text-muted mb-2">
-                        {% with score_str=item.relevance_score|floatformat:2 %}
-                        <span class="badge bg-light text-dark me-2">Релевантность: {{ score_str }}</span>
+                        {% with score_float=item.relevance_score %} {# Получаем числовое значение #}
+                        {% with score_str=score_float|floatformat:2 %} {# Форматируем в строку для вывода #}
+                        <span class="badge 
+                                            {% if score_float >= 0.9 %}
+                                                bg-success
+                                            {% elif score_float >= 0.75 %}
+                                                bg-primary 
+                                            {% elif score_float >= 0.5 %}
+                                                bg-info text-dark
+                                            {% else %}
+                                                bg-secondary
+                                            {% endif %}
+                                            me-2">
+                            Релевантность: {{ score_str }}
+                        </span>
+                        {% endwith %}
                         {% endwith %}
                         <span class="text-capitalize">Тип: {{ item.source_type }}</span>
                         | ID: {{ item.document_id|truncatechars:15 }}

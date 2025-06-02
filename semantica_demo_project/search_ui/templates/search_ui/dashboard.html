@@ -1,55 +1,59 @@
 {% extends "search_ui/base.html" %}
-{% load static %} {# Хотя здесь не используется, но хорошая практика #}
+{% load static %}
 
 {% block title %}{{ page_title }}{% endblock %}
 
 {% block content %}
-<div class="p-5 mb-4 bg-light rounded-3 shadow-sm">
-    <div class="container-fluid py-4">
-        <h1 class="display-5 fw-bold"><i class="bi bi-search-heart-fill me-2"></i>SemanticaПоиск</h1>
-        <p class="col-md-8 fs-5">Прототип распределенной системы семантического поиска информации.</p>
-        <hr class="my-4">
+<div class="p-4 mb-4 bg-light rounded-3 shadow-sm">
+    <div class="container-fluid">
+        <h1 class="display-5 fw-bold"><i class="bi bi-search-heart-fill me-2"></i>Semantica</h1>
+        <p class="col-lg-8 fs-5">Распределенная система семантического поиска информации.</p>
+        <hr class="my-3">
         <p>Используйте навигационное меню для перехода к управлению задачами индексации или к поиску по
             проиндексированным данным.</p>
-        {# Можно добавить карточки со "статистикой", как в примере, если у нас будет что отображать #}
-        {#
-        <div class="row g-3 text-center mt-4">
-            <div class="col-md-4">
-                <div class="card h-100 shadow-sm">
-                    <div class="card-body d-flex flex-column justify-content-between">
-                        <div>
-                            <h5 class="card-title"><i class="bi bi-card-list text-primary"></i> Задачи в обработке</h5>
-                            <p class="card-text fs-4 fw-bold">N/A</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card h-100 shadow-sm">
-                    <div class="card-body d-flex flex-column justify-content-between">
-                        <div>
-                            <h5 class="card-title"><i class="bi bi-file-earmark-check text-success"></i>
-                                Проиндексировано</h5>
-                            <p class="card-text fs-4 fw-bold">N/A</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card h-100 shadow-sm">
-                    <div class="card-body d-flex flex-column justify-content-between">
-                        <div>
-                            <h5 class="card-title"><i class="bi bi-server text-info"></i> Активные модули</h5>
-                            <p class="card-text fs-4 fw-bold">N/A</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        #}
     </div>
 </div>
 
-{# Можно добавить секцию "Недавние задачи" или "Последние поисковые запросы", если будет такая логика #}
+<div class="row g-3 text-center">
+    <div class="col-md-4">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body d-flex flex-column justify-content-center align-items-center">
+                <i class="bi bi-check-circle-fill text-success mb-2" style="font-size: 2.5rem;"></i>
+                <h5 class="card-title mb-1">Статус системы</h5>
+                <p class="card-text text-muted small">Все сервисы онлайн</p>
+            </div>
+        </div>
+    </div>
 
+    <div class="col-md-4">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body d-flex flex-column justify-content-center align-items-center">
+                <i class="bi bi-hourglass-split text-primary mb-2" style="font-size: 2.5rem;"></i>
+                <h5 class="card-title mb-1">В обработке</h5>
+                <p class="card-text fs-4 fw-bold">
+                    {% if request.session.task_ids %}
+                    {{ request.session.task_ids|length }}
+                    {% else %}
+                    0
+                    {% endif %}
+                    <small class="text-muted">задач</small>
+                </p>
+                <a href="{% url 'search_ui:task_management' %}" class="btn btn-outline-primary btn-sm mt-auto">Управлять
+                    задачами</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body d-flex flex-column justify-content-center align-items-center">
+                <i class="bi bi-file-earmark-text-fill text-info mb-2" style="font-size: 2.5rem;"></i>
+                <h5 class="card-title mb-1">Всего документов</h5>
+                <p class="card-text fs-4 fw-bold">1,024</p>
+                <a href="{% url 'search_ui:search_page' %}" class="btn btn-outline-info btn-sm mt-auto">Перейти к
+                    поиску</a>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
